@@ -5,8 +5,18 @@
 
 {% block content %}
     <h1>Upload Bilingual Text File</h1>
+    <p>Upload a .txt file with bilingual content. Optionally, upload a corresponding audio file (.mp3, .mp4, .wav, .m4a) for alignment.</p>
     <form method="post" enctype="multipart/form-data">
-        <input type="file" name="file" required>
+        <div>
+            <label for="file">Text File (.txt):</label><br>
+            <input type="file" name="file" id="file" required accept=".txt">
+        </div>
+        <br>
+        <div>
+            <label for="audio_file">Audio File (Optional, for alignment):</label><br>
+            <input type="file" name="audio_file" id="audio_file" accept=".mp3,.mp4,.wav,.m4a">
+        </div>
+        <br>
         <input type="submit" value="Upload and Process">
     </form>
 
@@ -20,12 +30,20 @@
                     <a href="{{ url_for('view_article', article_id=article.id) }}">
                         {{ article.filename }}
                     </a>
-                    {# Check if upload_timestamp is not None before formatting #}
                     {% if article.upload_timestamp %}
                         (Uploaded: {{ article.upload_timestamp.strftime('%Y-%m-%d %H:%M') }})
                     {% else %}
                         (Upload time unknown)
                     {% endif %}
+                    {% if article.processed_srt_path %}
+                        <span style="color: green;">(Audio Aligned)</span>
+                    {% else %}
+                        <a href="{{ url_for('align_audio_for_article', article_id=article.id) }}" style="font-size: 0.9em;">Align Audio</a>
+                    {% endif %}
+                     {# Optionally, add a download link for the bilingual SRT if it exists #}
+                     {% if article.processed_srt_path and false %} {# Disabled for now, need a serve route #}
+                         {# <a href="{{ url_for('download_srt', article_id=article.id) }}" style="font-size: 0.9em;">Download SRT</a> #}
+                     {% endif %}
                 </li>
             {% endfor %}
         </ul>

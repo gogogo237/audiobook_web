@@ -3,15 +3,67 @@
 
 {% block title %}Article: {{ article_filename }}{% endblock %}
 
+{% block head_extra %}
+<style>
+    .audiobook-controls {
+        margin-bottom: 15px;
+        padding: 10px;
+        background-color: #f0f0f0;
+        border: 1px solid #ddd;
+        border-radius: 4px;
+    }
+    .audiobook-controls label, .audiobook-controls button {
+        margin-right: 10px;
+    }
+    .playing-sentence {
+        background-color: #cce5ff; /* Light blue for active audio sentence */
+    }
+    /* For non-audiobook mode highlighting */
+    .highlighted-sentence {
+        background-color: #ffe0b2; /* Original highlight color */
+    }
+    audio#audioPlayer {
+        display: none; 
+        width: 100%;
+        margin-top: 10px;
+    }
+</style>
+{% endblock %}
+
+
 {% block content %}
     <h1>{{ article_filename }}</h1>
+
+    <div id="python-debug-info" style="display:none;">
+        Python `has_timestamps`: {{ has_timestamps|tojson }}
+    </div>
+
+    {% if has_timestamps %}
+    <div class="audiobook-controls">
+        <button id="toggleAudiobookMode">Enable Audiobook Mode</button>
+        <input type="file" id="localAudioFile" accept=".mp3,.wav,.m4a" style="display: none;">
+        <span id="audioFileName" style="margin-left: 10px;">No audio file selected.</span>
+        <audio id="audioPlayer" controls></audio> 
+        <p id="audiobookHint" style="font-size:0.9em; color: #555; margin-top: 5px; display:none;">
+            Select your local audio file. Click on an English sentence to play its audio. (Using Web Audio API for playback)
+        </p>
+    </div>
+    {% else %}
+    <p><em>Audio timestamps not available for this article. 
+        <a href="{{ url_for('align_audio_for_article', article_id=article_id) }}">Align Audio?</a>
+    </em></p>
+    {% endif %}
+
     <div class="bilingual-content" id="article-content-wrapper">
         {% if structured_article %}
             {% for paragraph_sentences in structured_article %}
                 <div class="paragraph">
                     <p>
                         {%- for sentence_pair in paragraph_sentences -%}
-                            <span class="english-sentence" data-translation="{{ sentence_pair.chinese }}">
+                            <span class="english-sentence" 
+                                  data-translation="{{ sentence_pair.chinese }}"
+                                  {% if sentence_pair.start_time_ms is not none %} data-start-time-ms="{{ sentence_pair.start_time_ms }}"{% endif %}
+                                  {% if sentence_pair.end_time_ms is not none %} data-end-time-ms="{{ sentence_pair.end_time_ms }}"{% endif %}>
                                 {{- sentence_pair.english -}}
                             </span>{{- " " -}}
                         {%- endfor -%}
@@ -22,9 +74,7 @@
             <p>No content found for this article, or the article is empty.</p>
         {% endif %}
     </div>
-    {# Removed the <p><a href="{{ url_for('index') }}">Back to list</a></p> as Home is in footer now #}
 
-    <!-- Pop-up for Chinese translation (used by right-click and footer button) -->
     <div id="translation-popup"></div>
 {% endblock %}
 
@@ -32,7 +82,7 @@
     <div class="action-buttons-footer">
         <div class="action-buttons-footer-inner-content">
             <a href="{{ url_for('index') }}" class="footer-icon-button" title="Back to Home">
-                <span class="icon">🏠</span> {# Home icon #}
+                <span class="icon">🏠</span>
             </a>
             <button id="showTranslationFooterButton" class="footer-icon-button" title="Show Translation for Highlighted Sentence (Tap/Click)">
                 <span class="icon">💬</span>
@@ -44,75 +94,90 @@
 
 {% block scripts %}
 <script>
-// JavaScript remains the same as the previous version
-// ... (all the JavaScript from the previous correct version)
 document.addEventListener('DOMContentLoaded', function() {
+    let pythonHasTimestamps = false;
+    try {
+        const debugInfoElement = document.getElementById('python-debug-info');
+        if (debugInfoElement) {
+            const textContent = debugInfoElement.textContent;
+            const jsonPart = textContent.substring(textContent.indexOf(':') + 1).trim();
+            pythonHasTimestamps = JSON.parse(jsonPart);
+        }
+    } catch (e) {
+        console.error("JS: Error parsing python-debug-info:", e);
+    }
+    console.log("JS: Page loaded. Python `has_timestamps` (from hidden div):", pythonHasTimestamps);
+    
     const articleContentWrapper = document.getElementById('article-content-wrapper');
     const popup = document.getElementById('translation-popup');
-    let highlightedSentence = null;
-    let currentPopupTargetSentence = null;
-
+    let highlightedSentence = null;     // For non-audiobook mode sentence selection
+    let currentPopupTargetSentence = null; 
     const showTranslationFooterButton = document.getElementById('showTranslationFooterButton');
+
+    // --- Web Audio API Variables ---
+    let audioContext = null;
+    let audioBuffer = null;
+    let currentSourceNode = null;       // Tracks the currently playing Web Audio Node
+    let isAudiobookMode = false;
+    let currentPlayingSentence = null;  // Tracks the sentence element corresponding to currentSourceNode
+                                        // This will also serve as the "sticky" highlighted sentence in audiobook mode
+    let maxSentenceEndTime = 0; 
+
+    const toggleAudiobookModeButton = document.getElementById('toggleAudiobookMode');
+    const localAudioFileInput = document.getElementById('localAudioFile');
+    const audioFileNameSpan = document.getElementById('audioFileName');
+    const audiobookHint = document.getElementById('audiobookHint');
+
 
     function displayPopup(targetElement, content, isErrorMessage = false) {
         popup.innerHTML = content;
         const rect = targetElement.getBoundingClientRect();
-        
         popup.style.visibility = 'hidden';
         popup.style.display = 'block';
         let popupWidth = popup.offsetWidth;
         let popupHeight = popup.offsetHeight;
-
         let popupTop, popupLeft;
-
         if (isErrorMessage) {
-            const buttonRect = showTranslationFooterButton.getBoundingClientRect(); // Base off translation button for consistency
-            popupTop = buttonRect.top - popupHeight - 10 + window.scrollY; 
-            popupLeft = buttonRect.left + (buttonRect.width / 2) - (popupWidth / 2) + window.scrollX;
+            const triggerButtonRect = (targetElement === showTranslationFooterButton) ? 
+                                      showTranslationFooterButton.getBoundingClientRect() : 
+                                      targetElement.getBoundingClientRect(); 
+            popupTop = triggerButtonRect.top - popupHeight - 10 + window.scrollY; 
+            popupLeft = triggerButtonRect.left + (triggerButtonRect.width / 2) - (popupWidth / 2) + window.scrollX;
         } else { 
             popupTop = rect.bottom + window.scrollY + 8; 
             popupLeft = rect.left + window.scrollX + (rect.width / 2) - (popupWidth / 2);
         }
-
-        const minLeft = 10;
+        const minLeft = 10 + window.scrollX;
         const viewportWidth = window.innerWidth;
-        const viewportHeight = window.innerHeight;
-
-        let maxLeft = viewportWidth - popupWidth - 10;
+        let maxLeft = window.scrollX + viewportWidth - popupWidth - 10;
         if (maxLeft < minLeft) maxLeft = minLeft;
-
-        if (popupLeft < minLeft) popupLeft = minLeft;
-        else if (popupLeft > maxLeft) popupLeft = maxLeft;
-
-        if (popupTop < window.scrollY + 10) {
-             popupTop = window.scrollY + 10;
-        }
+        popupLeft = Math.max(minLeft, Math.min(popupLeft, maxLeft));
+        if (popupTop < window.scrollY + 10) popupTop = window.scrollY + 10;
+        const viewportHeight = window.innerHeight;
         if (popupTop + popupHeight > window.scrollY + viewportHeight - 10) {
-            if (isErrorMessage && targetElement === showTranslationFooterButton) {
-                 if (rect.top - popupHeight - 10 > window.scrollY) {
-                    popupTop = rect.top - popupHeight - 10 + window.scrollY;
-                 } else { 
-                    popupTop = window.scrollY + viewportHeight - popupHeight - 10;
-                 }
-            } else if (!isErrorMessage) { 
-                if (rect.top - popupHeight - 8 > window.scrollY) {
-                    popupTop = rect.top - popupHeight - 8 + window.scrollY;
-                } else {
-                    popupTop = window.scrollY + viewportHeight - popupHeight - 10;
-                }
-            } else {
-                 popupTop = window.scrollY + viewportHeight - popupHeight - 10;
+            let alternativeTop = rect.top - popupHeight - 8 + window.scrollY;
+            if (isErrorMessage) {
+                const triggerButtonRect = (targetElement === showTranslationFooterButton) ? 
+                                          showTranslationFooterButton.getBoundingClientRect() : 
+                                          targetElement.getBoundingClientRect();
+                alternativeTop = triggerButtonRect.top - popupHeight - 10 + window.scrollY;
+            }
+            if (alternativeTop > window.scrollY + 10) {
+                popupTop = alternativeTop;
+            } else { 
+                popupTop = window.scrollY + viewportHeight - popupHeight - 10;
             }
         }
-        
         popup.style.top = popupTop + 'px';
         popup.style.left = popupLeft + 'px';
         popup.style.visibility = 'visible';
     }
 
-
     if (articleContentWrapper) {
         articleContentWrapper.addEventListener('contextmenu', function(event) {
+            // Allow context menu for translation even in audiobook mode,
+            // but it will operate on 'highlightedSentence' (non-audiobook selection)
+            // or the sentence right-clicked if no 'highlightedSentence' exists.
             const targetSentence = event.target.closest('.english-sentence');
             if (targetSentence) {
                 event.preventDefault();
@@ -120,6 +185,14 @@ document.addEventListener('DOMContentLoaded', function() {
                 if (translation) {
                     displayPopup(targetSentence, translation);
                     currentPopupTargetSentence = targetSentence;
+                } else {
+                    displayPopup(targetSentence, "No translation available for this sentence.", true);
+                }
+                // Update highlightedSentence for non-audiobook mode logic if needed
+                if (!isAudiobookMode) {
+                    if (highlightedSentence) highlightedSentence.classList.remove('highlighted-sentence');
+                    targetSentence.classList.add('highlighted-sentence');
+                    highlightedSentence = targetSentence;
                 }
             } else {
                 if (popup.style.display === 'block') {
@@ -130,34 +203,51 @@ document.addEventListener('DOMContentLoaded', function() {
         });
 
         articleContentWrapper.addEventListener('click', function(event) {
-            if (popup.style.display === 'block' && !popup.contains(event.target) && !event.target.closest('.english-sentence')) {
-                if (!event.target.closest('.footer-icon-button')) { // Check if click is on any footer button
-                    popup.style.display = 'none';
-                    currentPopupTargetSentence = null;
-                }
+            // General click outside to hide popup
+            if (popup.style.display === 'block' && !popup.contains(event.target) && 
+                !event.target.closest('.english-sentence') && !event.target.closest('.footer-icon-button')) {
+                popup.style.display = 'none';
+                currentPopupTargetSentence = null;
             }
 
             const targetSentence = event.target.closest('.english-sentence');
             if (targetSentence) {
-                if (highlightedSentence === targetSentence) {
-                    targetSentence.classList.remove('highlighted-sentence');
-                    highlightedSentence = null;
-                    if (popup.style.display === 'block' && currentPopupTargetSentence === targetSentence) {
-                        popup.style.display = 'none';
-                        currentPopupTargetSentence = null;
+                if (isAudiobookMode && audioContext && audioBuffer) { 
+                    playSentenceAudio(targetSentence); // Handles its own highlighting via 'playing-sentence'
+                } else if (isAudiobookMode && (!audioContext || !audioBuffer)) {
+                    alert("Audio not loaded or ready. Please select an audio file.");
+                } else { 
+                    // Non-audiobook mode: toggle 'highlighted-sentence' for translation focus
+                    if (highlightedSentence === targetSentence) {
+                        // Clicked already highlighted sentence: deselect it
+                        targetSentence.classList.remove('highlighted-sentence');
+                        highlightedSentence = null;
+                        if (popup.style.display === 'block' && currentPopupTargetSentence === targetSentence) {
+                            popup.style.display = 'none';
+                            currentPopupTargetSentence = null;
+                        }
+                    } else { 
+                        // Clicked a new sentence: deselect old, select new
+                        if (highlightedSentence) {
+                            highlightedSentence.classList.remove('highlighted-sentence');
+                        }
+                        targetSentence.classList.add('highlighted-sentence');
+                        highlightedSentence = targetSentence;
+                        // If popup was for a different sentence, hide it
+                        if (popup.style.display === 'block' && currentPopupTargetSentence !== targetSentence) {
+                             popup.style.display = 'none';
+                             currentPopupTargetSentence = null;
+                        }
                     }
-                } else {
-                    if (highlightedSentence) {
-                        highlightedSentence.classList.remove('highlighted-sentence');
-                    }
-                    targetSentence.classList.add('highlighted-sentence');
-                    highlightedSentence = targetSentence;
                 }
             } else { 
-                if (highlightedSentence) {
+                // Clicked outside any sentence
+                if (!isAudiobookMode && highlightedSentence) { 
+                    // In non-audiobook mode, deselect sentence if clicked outside
                     highlightedSentence.classList.remove('highlighted-sentence');
                     highlightedSentence = null;
                 }
+                // Hide popup if click is outside relevant elements
                 if (popup.style.display === 'block' && !popup.contains(event.target) && !event.target.closest('.footer-icon-button')) {
                     popup.style.display = 'none';
                     currentPopupTargetSentence = null;
@@ -169,42 +259,240 @@ document.addEventListener('DOMContentLoaded', function() {
     if (showTranslationFooterButton) {
         showTranslationFooterButton.addEventListener('click', function(event) {
             event.stopPropagation(); 
+            
+            // Determine which sentence to show translation for:
+            // In audiobook mode, prefer 'currentPlayingSentence' if it exists (the one that's blue).
+            // Otherwise, use 'highlightedSentence' (the one selected by click in non-audiobook mode).
+            let sentenceToTranslate = null;
+            if (isAudiobookMode && currentPlayingSentence) {
+                sentenceToTranslate = currentPlayingSentence;
+            } else if (highlightedSentence) {
+                sentenceToTranslate = highlightedSentence;
+            }
 
-            if (highlightedSentence) {
-                if (popup.style.display === 'block' && currentPopupTargetSentence === highlightedSentence) {
+            if (sentenceToTranslate) {
+                if (popup.style.display === 'block' && currentPopupTargetSentence === sentenceToTranslate) {
                     popup.style.display = 'none';
                     currentPopupTargetSentence = null;
                 } else {
-                    const translation = highlightedSentence.dataset.translation;
+                    const translation = sentenceToTranslate.dataset.translation;
                     if (translation) {
-                        displayPopup(highlightedSentence, translation);
-                        currentPopupTargetSentence = highlightedSentence;
+                        displayPopup(sentenceToTranslate, translation);
+                        currentPopupTargetSentence = sentenceToTranslate;
                     } else {
-                        displayPopup(highlightedSentence, 'Translation not found.', true); 
+                        displayPopup(sentenceToTranslate, 'Translation not found for the selected sentence.', true); 
                         currentPopupTargetSentence = null; 
                     }
                 }
             } else {
-                if (popup.style.display === 'block' && popup.innerHTML.includes('请先选择句子')) {
+                if (popup.style.display === 'block' && popup.innerHTML.includes('Please select an English sentence first')) {
                      popup.style.display = 'none';
                      currentPopupTargetSentence = null;
                 } else {
-                    displayPopup(showTranslationFooterButton, '请先选择句子', true); 
+                    displayPopup(showTranslationFooterButton, 'Please select an English sentence first by clicking on it.', true); 
                     currentPopupTargetSentence = null; 
                 }
             }
         });
     }
-
+    
     document.addEventListener('click', function(event) {
         if (popup.style.display === 'block' && 
-            !popup.contains(event.target) &&
-            !event.target.closest('.english-sentence') &&
-            !event.target.closest('.footer-icon-button')) { // Check for any footer icon button
+            !popup.contains(event.target) && 
+            !event.target.closest('.english-sentence') && 
+            !event.target.closest('#showTranslationFooterButton') && 
+            !event.target.closest('.footer-icon-button')) { 
             popup.style.display = 'none';
             currentPopupTargetSentence = null;
         }
     });
+
+    if (toggleAudiobookModeButton) {
+        function initAudioContext() {
+            if (!audioContext) {
+                try {
+                    audioContext = new (window.AudioContext || window.webkitAudioContext)();
+                    console.log("JS: AudioContext initialized.");
+                } catch (e) {
+                    console.error("JS: Error initializing AudioContext:", e);
+                    alert("Web Audio API is not supported by this browser.");
+                    return false;
+                }
+            }
+            if (audioContext.state === 'suspended') {
+                audioContext.resume().then(() => {
+                    console.log("JS: AudioContext resumed.");
+                }).catch(e => console.error("JS: Error resuming AudioContext on init:", e));
+            }
+            return true;
+        }
+        
+        console.log("JS: Audiobook controls found. Calculating maxSentenceEndTime.");
+        document.querySelectorAll('.english-sentence').forEach(s => {
+            const endTimeStr = s.dataset.endTimeMs; 
+            if (endTimeStr) { 
+                const endTime = parseInt(endTimeStr, 10);
+                if (!isNaN(endTime) && endTime > maxSentenceEndTime) maxSentenceEndTime = endTime;
+            }
+        });
+        console.log(`JS: MaxSentenceEndTime calculation complete: ${maxSentenceEndTime}.`);
+
+        toggleAudiobookModeButton.addEventListener('click', function() {
+            if (!initAudioContext() && !isAudiobookMode) { 
+                return;
+            }
+
+            isAudiobookMode = !isAudiobookMode;
+            if (isAudiobookMode) {
+                toggleAudiobookModeButton.textContent = 'Disable Audiobook Mode';
+                localAudioFileInput.style.display = 'inline-block';
+                audiobookHint.style.display = 'block';
+                // Remove non-audiobook highlight if any
+                if (highlightedSentence) {
+                    highlightedSentence.classList.remove('highlighted-sentence');
+                    highlightedSentence = null;
+                }
+                if (popup.style.display === 'block') { // Hide popup when entering audiobook mode
+                    popup.style.display = 'none';
+                    currentPopupTargetSentence = null;
+                }
+            } else { // Disabling audiobook mode
+                toggleAudiobookModeButton.textContent = 'Enable Audiobook Mode';
+                localAudioFileInput.style.display = 'none';
+                audiobookHint.style.display = 'none';
+                if (currentSourceNode) {
+                    try {
+                        currentSourceNode.onended = null;
+                        currentSourceNode.stop();
+                        currentSourceNode.disconnect();
+                    } catch(e) { console.warn("JS: Error stopping source on mode disable", e); }
+                    currentSourceNode = null;
+                }
+                // Clear 'playing-sentence' highlight when disabling mode
+                if (currentPlayingSentence) {
+                    currentPlayingSentence.classList.remove('playing-sentence');
+                    currentPlayingSentence = null;
+                }
+            }
+        });
+
+        localAudioFileInput.addEventListener('change', async function(event) {
+            if (!audioContext) { 
+                if (!initAudioContext()) {
+                    alert("Could not initialize audio system. Please try enabling audiobook mode first.");
+                    return;
+                }
+            }
+            const file = event.target.files[0];
+            if (file) {
+                audioFileNameSpan.textContent = "Loading: " + file.name;
+                if (currentSourceNode) {
+                    try {
+                        currentSourceNode.onended = null; currentSourceNode.stop(); currentSourceNode.disconnect();
+                    } catch(e) { /* ignore */ }
+                    currentSourceNode = null;
+                }
+                if (currentPlayingSentence) { // Clear highlight of previously playing sentence if loading new file
+                    currentPlayingSentence.classList.remove('playing-sentence');
+                    currentPlayingSentence = null;
+                }
+                audioBuffer = null; 
+
+                try {
+                    const arrayBuffer = await file.arrayBuffer();
+                    audioBuffer = await audioContext.decodeAudioData(arrayBuffer);
+                    audioFileNameSpan.textContent = file.name;
+                    console.log("JS (Web Audio): Audio file decoded. Duration:", audioBuffer.duration.toFixed(3) + "s");
+                    if (maxSentenceEndTime > 0 && (audioBuffer.duration * 1000 < maxSentenceEndTime)) {
+                        alert(`Warning: Audio duration (${(audioBuffer.duration).toFixed(2)}s) is shorter than max sentence end time (${(maxSentenceEndTime/1000).toFixed(2)}s).`);
+                    }
+                } catch (e) {
+                    console.error("JS (Web Audio): Error decoding audio data:", e);
+                    alert(`Error decoding audio file "${file.name}": ${e.message}`);
+                    audioFileNameSpan.textContent = "Error loading: " + file.name;
+                    audioBuffer = null;
+                }
+            }
+        });
+
+        function playSentenceAudio(sentenceElement) {
+            if (!audioContext || audioContext.state === 'closed') {
+                console.error("JS (Web Audio): AudioContext error."); alert("Audio system error."); return;
+            }
+            if (audioContext.state === 'suspended') {
+                audioContext.resume().then(() => proceedWithPlayback(sentenceElement))
+                                  .catch(e => { console.error("JS: Resume AudioContext failed:", e); alert("Could not start audio."); });
+            } else {
+                proceedWithPlayback(sentenceElement);
+            }
+        }
+        
+        function proceedWithPlayback(sentenceElement) {
+            console.log("JS (Web Audio): playSentenceAudio for:", sentenceElement.textContent.substring(0,30));
+            if (!audioBuffer) { alert("Please load an audio file."); return; }
+            if (!isAudiobookMode) { console.warn("JS: Not in audiobook mode for playback."); return; }
+
+            if (currentSourceNode) { // Stop previous sound and clear its 'onended'
+                try {
+                    currentSourceNode.onended = null; currentSourceNode.stop(); currentSourceNode.disconnect();
+                } catch (e) { /* ignore */ }
+            }
+            // If there was a 'currentPlayingSentence' (blue highlight), remove it ONLY IF it's not the one we are about to play.
+            // This ensures clicking the same sentence again correctly restarts it and maintains highlight.
+            if (currentPlayingSentence && currentPlayingSentence !== sentenceElement) {
+                currentPlayingSentence.classList.remove('playing-sentence');
+            }
+
+            const startTimeStr = sentenceElement.dataset.startTimeMs;
+            const endTimeStr = sentenceElement.dataset.endTimeMs;
+            if (!startTimeStr || !endTimeStr) { alert("Sentence missing time data."); return; }
+
+            const startTimeMs = parseInt(startTimeStr, 10);
+            const endTimeMs = parseInt(endTimeStr, 10);
+            if (isNaN(startTimeMs) || isNaN(endTimeMs)) { alert("Invalid time data."); return; }
+
+            const offsetInSeconds = startTimeMs / 1000.0;
+            let durationInSeconds = (endTimeMs - startTimeMs) / 1000.0;
+
+            if (offsetInSeconds < 0 || offsetInSeconds >= audioBuffer.duration) {
+                alert("Sentence start time out of audio bounds."); return;
+            }
+            if (durationInSeconds <= 0) { 
+                console.warn(`JS (Web Audio): Corrected duration to minimal if non-positive: ${durationInSeconds}s.`);
+                durationInSeconds = 0.05; // Play a very short sound or handle as error
+            }
+            const clampedDuration = Math.min(durationInSeconds, audioBuffer.duration - offsetInSeconds);
+
+            // Set new currentPlayingSentence and apply highlight
+            currentPlayingSentence = sentenceElement; // This is the one that will remain highlighted
+            currentPlayingSentence.classList.add('playing-sentence');
+
+            currentSourceNode = audioContext.createBufferSource();
+            currentSourceNode.buffer = audioBuffer;
+            currentSourceNode.connect(audioContext.destination);
+            console.log(`JS (Web Audio): Starting. Offset: ${offsetInSeconds.toFixed(3)}s, Duration: ${clampedDuration.toFixed(3)}s`);
+            
+            try {
+                currentSourceNode.start(0, offsetInSeconds, clampedDuration); 
+            } catch (e) {
+                console.error("JS (Web Audio): Error on sourceNode.start():", e);
+                alert(`Could not start playback: ${e.message}`);
+                if (currentPlayingSentence) currentPlayingSentence.classList.remove('playing-sentence');
+                currentPlayingSentence = null;
+                return;
+            }
+            
+            currentSourceNode.onended = () => {
+                // IMPORTANT: When a sentence finishes, we DO NOT remove the 'playing-sentence' class here.
+                // It should remain highlighted. It will be removed if another sentence is played,
+                // or if audiobook mode is disabled, or if a new file is loaded.
+                console.log(`JS (Web Audio): Playback ended (onended) for: ${sentenceElement.textContent.substring(0,30)}. Highlight remains.`);
+                // No need to set currentPlayingSentence to null here, as we want it to remember the last played/highlighted.
+            };
+        } 
+    } else {
+        console.log("JS: toggleAudiobookModeButton not found.");
+    }
 });
 </script>
 {% endblock %}

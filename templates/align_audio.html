@@ -1,0 +1,20 @@
+<!-- bilingual_app/templates/align_audio.html -->
+{% extends "base.html" %}
+
+{% block title %}Align Audio for {{ article_filename }}{% endblock %}
+
+{% block content %}
+    <h1>Align Audio for: {{ article_filename }}</h1>
+    <p>Upload an audio file (.mp3, .mp4, .wav, .m4a) to align with the text of this article.</p>
+    <form method="post" enctype="multipart/form-data">
+        <div>
+            <label for="audio_file">Audio File:</label><br>
+            <input type="file" name="audio_file" id="audio_file" required accept=".mp3,.mp4,.wav,.m4a">
+        </div>
+        <br>
+        <input type="submit" value="Upload and Align Audio">
+    </form>
+    <hr>
+    <p><a href="{{ url_for('view_article', article_id=article_id) }}">Back to Article</a></p>
+    <p><a href="{{ url_for('index') }}">Back to Home</a></p>
+{% endblock %}

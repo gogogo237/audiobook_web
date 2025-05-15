@@ -6,6 +6,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1, shrink-to-fit=no">
     <title>{% block title %}Bilingual Reader{% endblock %}</title>
     <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+    {% block head_extra %}{% endblock %} {# New block for extra head content #}
 </head>
 <body>
     <nav>
@@ -22,7 +23,7 @@
         {% block content %}{% endblock %}
     </div>
 
-    {% block footer_actions %}{% endblock %} {# New block for fixed footer elements #}
+    {% block footer_actions %}{% endblock %}
 
     {% block scripts %}{% endblock %}
 </body>
