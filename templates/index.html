@@ -1,0 +1,35 @@
+<!-- bilingual_app/templates/index.html -->
+{% extends "base.html" %}
+
+{% block title %}Upload and View Articles{% endblock %}
+
+{% block content %}
+    <h1>Upload Bilingual Text File</h1>
+    <form method="post" enctype="multipart/form-data">
+        <input type="file" name="file" required>
+        <input type="submit" value="Upload and Process">
+    </form>
+
+    <hr>
+
+    <h2>Available Articles</h2>
+    {% if articles %}
+        <ul>
+            {% for article in articles %}
+                <li>
+                    <a href="{{ url_for('view_article', article_id=article.id) }}">
+                        {{ article.filename }}
+                    </a>
+                    {# Check if upload_timestamp is not None before formatting #}
+                    {% if article.upload_timestamp %}
+                        (Uploaded: {{ article.upload_timestamp.strftime('%Y-%m-%d %H:%M') }})
+                    {% else %}
+                        (Upload time unknown)
+                    {% endif %}
+                </li>
+            {% endfor %}
+        </ul>
+    {% else %}
+        <p>No articles uploaded yet.</p>
+    {% endif %}
+{% endblock %}

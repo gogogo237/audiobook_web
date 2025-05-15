@@ -1,0 +1,156 @@
+/* bilingual_app/static/style.css */
+body {
+    font-family: Georgia, 'Times New Roman', Times, serif;
+    line-height: 1.6;
+    margin: 0;
+    background-color: #f4f4f4;
+    color: #333;
+    padding-bottom: 80px; /* Should still be fine */
+    padding-top: 20px;
+}
+
+.container {
+    background-color: #fff;
+    padding: 20px;
+    border-radius: 5px;
+    box-shadow: 0 0 10px rgba(0,0,0,0.1);
+    max-width: 900px;
+    margin: 0 auto 20px auto;
+}
+
+nav {
+    background-color: #fff;
+    padding: 10px 0;
+    border-bottom: 1px solid #ddd;
+    text-align: center;
+    margin-bottom: 20px;
+}
+
+nav a {
+    text-decoration: none;
+    color: #007bff;
+    margin: 0 15px;
+}
+
+nav a:hover {
+    text-decoration: underline;
+}
+
+h1, h2 {
+    color: #333;
+}
+
+/* ... (other styles like form, ul, alerts remain the same) ... */
+
+.alert {
+    padding: 10px;
+    margin-bottom: 15px;
+    border: 1px solid transparent;
+    border-radius: 4px;
+}
+.alert-success {
+    color: #155724;
+    background-color: #d4edda;
+    border-color: #c3e6cb;
+}
+.alert-danger {
+    color: #721c24;
+    background-color: #f8d7da;
+    border-color: #f5c6cb;
+}
+
+.bilingual-content .paragraph {
+    margin-bottom: 1em;
+}
+
+.bilingual-content .paragraph > p {
+    text-indent: 2em;
+    line-height: 1.7;
+    margin: 0 0 1em 0;
+    text-align: justify;
+}
+
+.bilingual-content .english-sentence {
+    cursor: pointer;
+    color: #222;
+}
+
+.highlighted-sentence {
+    background-color: #ffe0b2;
+}
+
+#translation-popup {
+    display: none;
+    position: absolute;
+    border: 1px solid #aaa;
+    background-color: #f9f9f9;
+    padding: 10px 15px;
+    border-radius: 4px;
+    box-shadow: 0px 2px 8px rgba(0,0,0,0.15);
+    z-index: 1000;
+    max-width: 350px;
+    font-size: 0.95em;
+    color: #333;
+    line-height: 1.5;
+}
+
+/* ----- Styles for Fixed Footer Action Button ----- */
+.action-buttons-footer {
+    position: fixed;
+    bottom: 0;
+    left: 0;
+    width: 100%;
+    background-color: #f8f9fa;
+    border-top: 1px solid #e0e0e0;
+    padding: 10px 0;
+    z-index: 999;
+    box-sizing: border-box;
+    text-align: center;
+}
+
+.action-buttons-footer-inner-content {
+    max-width: 900px;
+    margin: 0 auto;
+    padding: 0 20px;
+    box-sizing: border-box;
+    display: flex;
+    justify-content: center; /* Center the group of buttons */
+    align-items: center;
+    gap: 20px; /* Space between the buttons */
+}
+
+/* Common style for icon buttons in the footer (applies to <a> and <button>) */
+.footer-icon-button {
+    background-color: #007bff;
+    color: white;
+    border: none;
+    width: 48px;
+    height: 48px;
+    padding: 0;
+    font-size: 1rem; /* Base for icon sizing if needed, though icon class handles specific size */
+    border-radius: 50%; /* Circular */
+    cursor: pointer;
+    transition: background-color 0.2s ease-in-out, box-shadow 0.2s ease-in-out;
+    box-shadow: 0 2px 5px rgba(0,0,0,0.1);
+    display: flex; /* For centering icon inside */
+    align-items: center;
+    justify-content: center;
+    line-height: 1; /* Helps with icon vertical alignment */
+    text-decoration: none; /* For <a> tags */
+}
+
+.footer-icon-button:hover {
+    background-color: #0056b3;
+    box-shadow: 0 4px 8px rgba(0,0,0,0.15);
+}
+
+.footer-icon-button:active {
+    background-color: #004085;
+    box-shadow: 0 1px 3px rgba(0,0,0,0.1);
+}
+
+.footer-icon-button .icon {
+    margin-right: 0; /* Icon is centered by flex */
+    font-size: 1.5em; /* Adjust icon size as needed */
+    /* No vertical-align needed due to flex centering */
+}

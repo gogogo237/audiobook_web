@@ -1,0 +1,210 @@
+<!-- bilingual_app/templates/article.html -->
+{% extends "base.html" %}
+
+{% block title %}Article: {{ article_filename }}{% endblock %}
+
+{% block content %}
+    <h1>{{ article_filename }}</h1>
+    <div class="bilingual-content" id="article-content-wrapper">
+        {% if structured_article %}
+            {% for paragraph_sentences in structured_article %}
+                <div class="paragraph">
+                    <p>
+                        {%- for sentence_pair in paragraph_sentences -%}
+                            <span class="english-sentence" data-translation="{{ sentence_pair.chinese }}">
+                                {{- sentence_pair.english -}}
+                            </span>{{- " " -}}
+                        {%- endfor -%}
+                    </p>
+                </div>
+            {% endfor %}
+        {% else %}
+            <p>No content found for this article, or the article is empty.</p>
+        {% endif %}
+    </div>
+    {# Removed the <p><a href="{{ url_for('index') }}">Back to list</a></p> as Home is in footer now #}
+
+    <!-- Pop-up for Chinese translation (used by right-click and footer button) -->
+    <div id="translation-popup"></div>
+{% endblock %}
+
+{% block footer_actions %}
+    <div class="action-buttons-footer">
+        <div class="action-buttons-footer-inner-content">
+            <a href="{{ url_for('index') }}" class="footer-icon-button" title="Back to Home">
+                <span class="icon">🏠</span> {# Home icon #}
+            </a>
+            <button id="showTranslationFooterButton" class="footer-icon-button" title="Show Translation for Highlighted Sentence (Tap/Click)">
+                <span class="icon">💬</span>
+            </button>
+        </div>
+    </div>
+{% endblock %}
+
+
+{% block scripts %}
+<script>
+// JavaScript remains the same as the previous version
+// ... (all the JavaScript from the previous correct version)
+document.addEventListener('DOMContentLoaded', function() {
+    const articleContentWrapper = document.getElementById('article-content-wrapper');
+    const popup = document.getElementById('translation-popup');
+    let highlightedSentence = null;
+    let currentPopupTargetSentence = null;
+
+    const showTranslationFooterButton = document.getElementById('showTranslationFooterButton');
+
+    function displayPopup(targetElement, content, isErrorMessage = false) {
+        popup.innerHTML = content;
+        const rect = targetElement.getBoundingClientRect();
+        
+        popup.style.visibility = 'hidden';
+        popup.style.display = 'block';
+        let popupWidth = popup.offsetWidth;
+        let popupHeight = popup.offsetHeight;
+
+        let popupTop, popupLeft;
+
+        if (isErrorMessage) {
+            const buttonRect = showTranslationFooterButton.getBoundingClientRect(); // Base off translation button for consistency
+            popupTop = buttonRect.top - popupHeight - 10 + window.scrollY; 
+            popupLeft = buttonRect.left + (buttonRect.width / 2) - (popupWidth / 2) + window.scrollX;
+        } else { 
+            popupTop = rect.bottom + window.scrollY + 8; 
+            popupLeft = rect.left + window.scrollX + (rect.width / 2) - (popupWidth / 2);
+        }
+
+        const minLeft = 10;
+        const viewportWidth = window.innerWidth;
+        const viewportHeight = window.innerHeight;
+
+        let maxLeft = viewportWidth - popupWidth - 10;
+        if (maxLeft < minLeft) maxLeft = minLeft;
+
+        if (popupLeft < minLeft) popupLeft = minLeft;
+        else if (popupLeft > maxLeft) popupLeft = maxLeft;
+
+        if (popupTop < window.scrollY + 10) {
+             popupTop = window.scrollY + 10;
+        }
+        if (popupTop + popupHeight > window.scrollY + viewportHeight - 10) {
+            if (isErrorMessage && targetElement === showTranslationFooterButton) {
+                 if (rect.top - popupHeight - 10 > window.scrollY) {
+                    popupTop = rect.top - popupHeight - 10 + window.scrollY;
+                 } else { 
+                    popupTop = window.scrollY + viewportHeight - popupHeight - 10;
+                 }
+            } else if (!isErrorMessage) { 
+                if (rect.top - popupHeight - 8 > window.scrollY) {
+                    popupTop = rect.top - popupHeight - 8 + window.scrollY;
+                } else {
+                    popupTop = window.scrollY + viewportHeight - popupHeight - 10;
+                }
+            } else {
+                 popupTop = window.scrollY + viewportHeight - popupHeight - 10;
+            }
+        }
+        
+        popup.style.top = popupTop + 'px';
+        popup.style.left = popupLeft + 'px';
+        popup.style.visibility = 'visible';
+    }
+
+
+    if (articleContentWrapper) {
+        articleContentWrapper.addEventListener('contextmenu', function(event) {
+            const targetSentence = event.target.closest('.english-sentence');
+            if (targetSentence) {
+                event.preventDefault();
+                const translation = targetSentence.dataset.translation;
+                if (translation) {
+                    displayPopup(targetSentence, translation);
+                    currentPopupTargetSentence = targetSentence;
+                }
+            } else {
+                if (popup.style.display === 'block') {
+                    popup.style.display = 'none';
+                    currentPopupTargetSentence = null;
+                }
+            }
+        });
+
+        articleContentWrapper.addEventListener('click', function(event) {
+            if (popup.style.display === 'block' && !popup.contains(event.target) && !event.target.closest('.english-sentence')) {
+                if (!event.target.closest('.footer-icon-button')) { // Check if click is on any footer button
+                    popup.style.display = 'none';
+                    currentPopupTargetSentence = null;
+                }
+            }
+
+            const targetSentence = event.target.closest('.english-sentence');
+            if (targetSentence) {
+                if (highlightedSentence === targetSentence) {
+                    targetSentence.classList.remove('highlighted-sentence');
+                    highlightedSentence = null;
+                    if (popup.style.display === 'block' && currentPopupTargetSentence === targetSentence) {
+                        popup.style.display = 'none';
+                        currentPopupTargetSentence = null;
+                    }
+                } else {
+                    if (highlightedSentence) {
+                        highlightedSentence.classList.remove('highlighted-sentence');
+                    }
+                    targetSentence.classList.add('highlighted-sentence');
+                    highlightedSentence = targetSentence;
+                }
+            } else { 
+                if (highlightedSentence) {
+                    highlightedSentence.classList.remove('highlighted-sentence');
+                    highlightedSentence = null;
+                }
+                if (popup.style.display === 'block' && !popup.contains(event.target) && !event.target.closest('.footer-icon-button')) {
+                    popup.style.display = 'none';
+                    currentPopupTargetSentence = null;
+                }
+            }
+        });
+    }
+
+    if (showTranslationFooterButton) {
+        showTranslationFooterButton.addEventListener('click', function(event) {
+            event.stopPropagation(); 
+
+            if (highlightedSentence) {
+                if (popup.style.display === 'block' && currentPopupTargetSentence === highlightedSentence) {
+                    popup.style.display = 'none';
+                    currentPopupTargetSentence = null;
+                } else {
+                    const translation = highlightedSentence.dataset.translation;
+                    if (translation) {
+                        displayPopup(highlightedSentence, translation);
+                        currentPopupTargetSentence = highlightedSentence;
+                    } else {
+                        displayPopup(highlightedSentence, 'Translation not found.', true); 
+                        currentPopupTargetSentence = null; 
+                    }
+                }
+            } else {
+                if (popup.style.display === 'block' && popup.innerHTML.includes('请先选择句子')) {
+                     popup.style.display = 'none';
+                     currentPopupTargetSentence = null;
+                } else {
+                    displayPopup(showTranslationFooterButton, '请先选择句子', true); 
+                    currentPopupTargetSentence = null; 
+                }
+            }
+        });
+    }
+
+    document.addEventListener('click', function(event) {
+        if (popup.style.display === 'block' && 
+            !popup.contains(event.target) &&
+            !event.target.closest('.english-sentence') &&
+            !event.target.closest('.footer-icon-button')) { // Check for any footer icon button
+            popup.style.display = 'none';
+            currentPopupTargetSentence = null;
+        }
+    });
+});
+</script>
+{% endblock %}
