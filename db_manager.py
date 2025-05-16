@@ -126,9 +126,22 @@ def get_article_filename(article_id):
     conn = get_db_connection()
     cursor = conn.cursor()
     cursor.execute("SELECT filename FROM articles WHERE id = ?", (article_id,))
+    article_row = cursor.fetchone()
+    conn.close()
+    return article_row['filename'] if article_row else None
+
+def get_article_by_id(article_id):
+    """Retrieves a single article by its ID, including all relevant paths."""
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    cursor.execute("""
+        SELECT id, filename, upload_timestamp, processed_srt_path, converted_mp3_path 
+        FROM articles 
+        WHERE id = ?
+    """, (article_id,))
     article = cursor.fetchone()
     conn.close()
-    return article['filename'] if article else None
+    return article
 
 def get_sentences_for_article(article_id):
     """Retrieves all sentences for a given article, ordered correctly, including timestamps."""

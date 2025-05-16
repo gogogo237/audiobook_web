@@ -3,7 +3,7 @@ import os
 import tempfile
 import shutil 
 from pathlib import Path
-from flask import Flask, render_template, request, redirect, url_for, flash, jsonify
+from flask import Flask, render_template, request, redirect, url_for, flash, jsonify, send_from_directory
 from werkzeug.utils import secure_filename
 import db_manager  
 import text_parser 
@@ -72,7 +72,7 @@ _ensure_dirs_exist()
 def _process_audio_alignment(article_id, 
                              audio_file_storage, 
                              original_bilingual_text_content_string,
-                             article_filename_base):
+                             article_filename_base): # article_filename_base is stem of original text file
     temp_dir_base = Path(app.config['TEMP_FILES_FOLDER'])
     processed_srt_dir_base = Path(app.config['PROCESSED_SRT_FOLDER'])
     
@@ -93,9 +93,9 @@ def _process_audio_alignment(article_id,
 
             converted_mp3_path_str = audio_processor.convert_to_mp3(
                 str(original_audio_temp_path),
-                str(article_converted_audio_dir),
+                str(article_converted_audio_dir), # Output dir will be .../instance/converted_audio/<article_id>/
                 logger=app.logger
-            )
+            ) # converted_mp3_path_str will be like .../instance/converted_audio/<article_id>/<original_audio_stem>.mp3
             app.logger.info(f"APP: Converted audio stored persistently at: {converted_mp3_path_str} for article {article_id}")
             
             # Store persistent MP3 path in DB
@@ -119,7 +119,7 @@ def _process_audio_alignment(article_id,
             else:
                 app.logger.info(f"APP: Using {len(english_sentences_list_for_aeneas)} English sentences for Aeneas for article {article_id}.")
 
-            plain_text_filename = f"{article_filename_base}_eng_for_aeneas.txt"
+            plain_text_filename = f"{article_filename_base}_eng_for_aeneas.txt" # uses stem of original text file
             plain_text_temp_path = job_temp_dir_path / plain_text_filename
             audio_processor.create_plain_text_file_from_list(
                 english_sentences_list_for_aeneas,
@@ -128,11 +128,11 @@ def _process_audio_alignment(article_id,
             )
             app.logger.info(f"APP: Created plain English text file at {plain_text_temp_path} for article {article_id}")
 
-            aeneas_srt_filename = f"{article_filename_base}_aeneas_raw.srt"
+            aeneas_srt_filename = f"{article_filename_base}_aeneas_raw.srt" # uses stem of original text file
             aeneas_srt_temp_path = job_temp_dir_path / aeneas_srt_filename
             app.logger.info(f"APP: Running Aeneas for article {article_id} (MP3: {converted_mp3_path_str}, Text: {plain_text_temp_path}). Output to: {aeneas_srt_temp_path}")
             audio_processor.run_aeneas_alignment(
-                converted_mp3_path_str,
+                converted_mp3_path_str, # Use the persistently stored MP3 for Aeneas
                 str(plain_text_temp_path),
                 str(aeneas_srt_temp_path),
                 app.config['AENEAS_PYTHON_PATH'],
@@ -161,7 +161,7 @@ def _process_audio_alignment(article_id,
                 {'english_text': s['english_text'], 'chinese_text': s['chinese_text']} 
                 for s in full_sentences_data_from_db
             ]
-            final_bilingual_srt_filename = f"{article_filename_base}_bilingual.srt"
+            final_bilingual_srt_filename = f"{article_filename_base}_bilingual.srt" # uses stem of original text file
             article_srt_dir = processed_srt_dir_base / str(article_id)
             article_srt_dir.mkdir(parents=True, exist_ok=True)
             final_bilingual_srt_path = article_srt_dir / final_bilingual_srt_filename
@@ -202,29 +202,40 @@ def index():
         article_id = None
         raw_bilingual_text_content = None
 
+        # Initialize these to be used later if an audio file is also processed
+        article_title_for_db = None
+        article_safe_stem_for_files = None
+
         if text_file and allowed_text_file(text_file.filename):
-            text_filename_secure = secure_filename(text_file.filename)
+            original_text_filename = text_file.filename  # e.g., "Chapter 2.txt"
+            
+            # Name for DB and display: "Chapter 2"
+            article_title_for_db = Path(original_text_filename).stem 
+            
+            # Base for filesystem names (SRTs, temp Aeneas text): "Chapter_2"
+            article_safe_stem_for_files = secure_filename(article_title_for_db)
             
             try:
                 raw_bilingual_text_content = text_file.stream.read().decode('utf-8')
                 text_file.stream.seek(0)
             except UnicodeDecodeError:
-                app.logger.error(f"UnicodeDecodeError for text file {text_filename_secure}.", exc_info=True)
+                app.logger.error(f"UnicodeDecodeError for text file {original_text_filename}.", exc_info=True)
                 flash('Text file not UTF-8 encoded.', 'danger')
                 return redirect(request.url)
             except Exception as e:
-                app.logger.error(f"Error reading text file stream for {text_filename_secure}: {e}", exc_info=True)
+                app.logger.error(f"Error reading text file stream for {original_text_filename}: {e}", exc_info=True)
                 flash(f'Error reading text file: {str(e)}', 'danger')
                 return redirect(request.url)
 
             if not raw_bilingual_text_content.strip():
-                flash(f'Text file "{text_filename_secure}" is empty.', 'warning')
-                app.logger.warning(f"APP: Uploaded text file '{text_filename_secure}' is empty.")
+                flash(f'Text file "{original_text_filename}" is empty.', 'warning')
+                app.logger.warning(f"APP: Uploaded text file '{original_text_filename}' is empty.")
                 return redirect(request.url)
 
             try:
-                article_id = db_manager.add_article(text_filename_secure)
-                app.logger.info(f"APP: Added/updated article '{text_filename_secure}' with ID {article_id}.")
+                # Store the display-friendly name (e.g., "Chapter 2") in the DB
+                article_id = db_manager.add_article(article_title_for_db)
+                app.logger.info(f"APP: Added/updated article '{article_title_for_db}' with ID {article_id}.")
                 
                 processed_text_sentences_data = []
                 for p_idx, s_idx, en, zh in text_parser.parse_bilingual_file_content(raw_bilingual_text_content):
@@ -235,15 +246,15 @@ def index():
                     sentences_added_count = db_manager.add_sentences_batch(article_id, processed_text_sentences_data)
                 
                 if sentences_added_count > 0:
-                    flash(f'Text file "{text_filename_secure}" processed. {sentences_added_count} sentence pairs added.', 'success')
-                    app.logger.info(f"APP: Added {sentences_added_count} sentence pairs for article ID {article_id}.")
+                    flash(f'Text file "{original_text_filename}" (processed as "{article_title_for_db}"): {sentences_added_count} sentence pairs added.', 'success')
+                    app.logger.info(f"APP: Added {sentences_added_count} sentence pairs for article ID {article_id} ('{article_title_for_db}').")
                 else:
-                    flash(f'Text file "{text_filename_secure}" processed, but no valid sentence pairs found.', 'warning')
-                    app.logger.warning(f"APP: No valid sentence pairs found in '{text_filename_secure}' for article ID {article_id}.")
+                    flash(f'Text file "{original_text_filename}" (processed as "{article_title_for_db}"): no valid sentence pairs found.', 'warning')
+                    app.logger.warning(f"APP: No valid sentence pairs found in '{original_text_filename}' (for article '{article_title_for_db}', ID {article_id}).")
             
             except Exception as e:
-                app.logger.error(f"APP: Error processing text file {text_filename_secure}: {e}", exc_info=True)
-                flash(f'Error processing text file "{text_filename_secure}": {str(e)}', 'danger')
+                app.logger.error(f"APP: Error processing text file {original_text_filename} (for article '{article_title_for_db}'): {e}", exc_info=True)
+                flash(f'Error processing text file "{original_text_filename}": {str(e)}', 'danger')
                 return redirect(request.url)
         else:
             flash('Invalid text file type.', 'danger')
@@ -257,14 +268,17 @@ def index():
                     if not raw_bilingual_text_content: 
                          app.logger.error(f"APP: Internal error: Text content (raw_bilingual_text_content) not available for audio processing for article ID {article_id}.")
                          flash("Internal error: Text content not available for audio processing.", "danger")
+                    elif not article_safe_stem_for_files: # Should be set if text file was processed
+                         app.logger.error(f"APP: Internal error: article_safe_stem_for_files not set for audio processing for article ID {article_id}.")
+                         flash("Internal error: Article file stem not available for audio processing.", "danger")
                     else:
-                        article_filename_base = Path(text_filename_secure).stem
-                        app.logger.info(f"APP: Processing audio alignment for article ID {article_id} using uploaded text content.")
+                        # Use the filesystem-safe stem for generating internal filenames
+                        app.logger.info(f"APP: Processing audio alignment for article ID {article_id} ('{article_title_for_db}') using uploaded text content.")
                         _process_audio_alignment(
                             article_id, 
                             audio_file, 
                             raw_bilingual_text_content,
-                            article_filename_base
+                            article_safe_stem_for_files # Pass the safe stem e.g. "Chapter_2"
                         )
                 else:
                     flash(f'Invalid audio file type: "{audio_file.filename}". Supported: {ALLOWED_AUDIO_EXTENSIONS}', 'warning')
@@ -284,11 +298,16 @@ def index():
 
 @app.route('/article/<int:article_id>/align_audio', methods=['GET', 'POST'])
 def align_audio_for_article(article_id):
-    article_filename = db_manager.get_article_filename(article_id) 
-    if not article_filename:
+    article = db_manager.get_article_by_id(article_id) 
+    if not article:
         flash('Article not found.', 'danger')
         app.logger.warning(f"APP: Attempt to align audio for non-existent article ID: {article_id}")
         return redirect(url_for('index'))
+    
+    # article['filename'] from DB is already the stem, e.g., "Chapter 2"
+    article_title_from_db = article['filename']
+    # Create a filesystem-safe stem for internal file naming, e.g., "Chapter_2"
+    article_safe_stem_for_files = secure_filename(article_title_from_db)
     
     if request.method == 'POST':
         if 'audio_file' not in request.files:
@@ -300,12 +319,12 @@ def align_audio_for_article(article_id):
             return redirect(url_for('align_audio_for_article', article_id=article_id))
 
         if audio_file and allowed_audio_file(audio_file.filename):
-            app.logger.info(f"APP: Processing deferred audio alignment for article ID {article_id}. English sentences will be fetched from DB.")
+            app.logger.info(f"APP: Processing deferred audio alignment for article ID {article_id} ('{article_title_from_db}'). English sentences will be fetched from DB.")
             _process_audio_alignment(
                 article_id,
                 audio_file,
                 None, 
-                Path(article_filename).stem
+                article_safe_stem_for_files # Pass the safe stem e.g. "Chapter_2"
             )
             return redirect(url_for('view_article', article_id=article_id))
         else:
@@ -313,28 +332,30 @@ def align_audio_for_article(article_id):
             app.logger.warning(f"APP: Invalid audio file type for deferred alignment: {audio_file.filename}")
         return redirect(url_for('align_audio_for_article', article_id=article_id))
 
-    return render_template('align_audio.html', article_id=article_id, article_filename=article_filename)
+    return render_template('align_audio.html', article_id=article_id, article_filename=article_title_from_db)
 
 
 @app.route('/article/<int:article_id>')
 def view_article(article_id):
     app.logger.debug(f"APP: Attempting to view article ID: {article_id}")
-    article_filename = db_manager.get_article_filename(article_id)
-    if not article_filename:
+    article = db_manager.get_article_by_id(article_id)
+    if not article:
         flash('Article not found.', 'danger')
         app.logger.warning(f"APP: Article ID {article_id} not found for viewing.")
         return redirect(url_for('index'))
 
+    article_filename = article['filename']
+
     try:
         sentences_from_db = db_manager.get_sentences_for_article(article_id)
-        if app.logger.level <= logging.DEBUG and sentences_from_db: # Check app.logger not app_logger
+        if app.logger.level <= logging.DEBUG and sentences_from_db: 
             app.logger.debug(f"APP: Fetched {len(sentences_from_db)} sentences from DB for article {article_id}. First sentence data: {dict(sentences_from_db[0]) if sentences_from_db else 'N/A'}")
     except Exception as e:
         app.logger.error(f"APP: Error fetching sentences for article {article_id} ('{article_filename}'): {e}", exc_info=True)
         flash(f"Error retrieving content for article '{article_filename}'.", "danger")
         return redirect(url_for('index'))
     
-    structured_article = []
+    structured_article_content = []
     current_paragraph_index = -1
     current_paragraph_sentences = []
     has_timestamps = False 
@@ -342,7 +363,7 @@ def view_article(article_id):
     for sentence_row in sentences_from_db:
         if sentence_row['paragraph_index'] != current_paragraph_index:
             if current_paragraph_sentences:
-                structured_article.append(current_paragraph_sentences)
+                structured_article_content.append(current_paragraph_sentences)
             current_paragraph_sentences = []
             current_paragraph_index = sentence_row['paragraph_index']
         
@@ -358,23 +379,53 @@ def view_article(article_id):
             has_timestamps = True
             
     if current_paragraph_sentences: 
-        structured_article.append(current_paragraph_sentences)
+        structured_article_content.append(current_paragraph_sentences)
 
-    if not sentences_from_db and not structured_article:
+    if not sentences_from_db and not structured_article_content:
         app.logger.info(f"APP: Article {article_id} ('{article_filename}') has no sentences in DB to display.")
     
     if not has_timestamps and sentences_from_db: 
         app.logger.warning(f"APP: Article {article_id} ('{article_filename}') has sentences, but `has_timestamps` is false. No valid start/end times found in sentence data.")
-        if app.logger.level <= logging.DEBUG and sentences_from_db: # Check app.logger not app_logger
+        if app.logger.level <= logging.DEBUG and sentences_from_db: 
             app.logger.debug(f"APP: Sample of first sentence pair passed to template for article {article_id}: "
-                             f"{structured_article[0][0] if structured_article and structured_article[0] else 'N/A'}")
+                             f"{structured_article_content[0][0] if structured_article_content and structured_article_content[0] else 'N/A'}")
 
     app.logger.debug(f"APP: Rendering article.html for ID {article_id}. `has_timestamps` is: {has_timestamps}")
     return render_template('article.html',
-                           article_id=article_id,
-                           article_filename=article_filename,
-                           structured_article=structured_article,
+                           article=article, # Pass the whole article object
+                           structured_article=structured_article_content,
                            has_timestamps=has_timestamps)
+
+
+@app.route('/article/<int:article_id>/download_mp3')
+def download_mp3_for_article(article_id):
+    article = db_manager.get_article_by_id(article_id)
+    if not article:
+        flash('Article not found.', 'danger')
+        app.logger.warning(f"APP: Download MP3: Article ID {article_id} not found.")
+        return redirect(url_for('index'))
+
+    converted_mp3_path_str = article['converted_mp3_path']
+    if not converted_mp3_path_str:
+        flash('No converted MP3 file available for this article.', 'warning')
+        app.logger.warning(f"APP: Download MP3: No converted_mp3_path for article ID {article_id}.")
+        return redirect(url_for('view_article', article_id=article_id))
+
+    mp3_file_path = Path(converted_mp3_path_str)
+    if not mp3_file_path.is_file():
+        flash('Converted MP3 file not found on server.', 'danger')
+        app.logger.error(f"APP: Download MP3: File {mp3_file_path} not found for article ID {article_id}.")
+        return redirect(url_for('view_article', article_id=article_id))
+
+    directory = str(mp3_file_path.parent.resolve())
+    filename = mp3_file_path.name
+    
+    # Desired download name: original_text_filename_stem.mp3
+    original_text_filename_stem = Path(article['filename']).stem
+    download_name = f"{original_text_filename_stem}.mp3"
+
+    app.logger.info(f"APP: Serving MP3 file: {filename} from dir: {directory} for article ID {article_id} as {download_name}")
+    return send_from_directory(directory, filename, as_attachment=True, download_name=download_name)
 
 
 if __name__ == '__main__':

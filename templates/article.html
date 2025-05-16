@@ -1,7 +1,7 @@
 <!-- bilingual_app/templates/article.html -->
 {% extends "base.html" %}
 
-{% block title %}Article: {{ article_filename }}{% endblock %}
+{% block title %}Article: {{ article.filename }}{% endblock %}
 
 {% block head_extra %}
 <style>
@@ -12,8 +12,32 @@
         border: 1px solid #ddd;
         border-radius: 4px;
     }
-    .audiobook-controls label, .audiobook-controls button {
+    .audiobook-controls label, .audiobook-controls button, .audiobook-controls a {
         margin-right: 10px;
+        vertical-align: middle; /* Align items nicely */
+    }
+    .download-mp3-button {
+        display: inline-block;
+        padding: 6px 12px;
+        margin-bottom: 0;
+        font-size: 14px;
+        font-weight: 400;
+        line-height: 1.42857143;
+        text-align: center;
+        white-space: nowrap;
+        vertical-align: middle;
+        cursor: pointer;
+        background-image: none;
+        border: 1px solid transparent;
+        border-radius: 4px;
+        color: #fff;
+        background-color: #5cb85c; /* Green for download */
+        border-color: #4cae4c;
+        text-decoration: none; /* For <a> styled as button */
+    }
+    .download-mp3-button:hover {
+        background-color: #449d44;
+        border-color: #398439;
     }
     .playing-sentence {
         background-color: #cce5ff; /* Light blue for active audio sentence */
@@ -32,10 +56,11 @@
 
 
 {% block content %}
-    <h1>{{ article_filename }}</h1>
+    <h1>{{ article.filename }}</h1>
 
     <div id="python-debug-info" style="display:none;">
         Python `has_timestamps`: {{ has_timestamps|tojson }}
+        Python `article.converted_mp3_path`: {{ article.converted_mp3_path|tojson }}
     </div>
 
     {% if has_timestamps %}
@@ -50,9 +75,16 @@
     </div>
     {% else %}
     <p><em>Audio timestamps not available for this article. 
-        <a href="{{ url_for('align_audio_for_article', article_id=article_id) }}">Align Audio?</a>
+        <a href="{{ url_for('align_audio_for_article', article_id=article.id) }}">Align Audio?</a>
     </em></p>
     {% endif %}
+
+    {% if article.converted_mp3_path %}
+    <div style="margin-bottom: 15px;">
+        <a href="{{ url_for('download_mp3_for_article', article_id=article.id) }}" class="download-mp3-button">Download Converted Audio (MP3)</a>
+    </div>
+    {% endif %}
+
 
     <div class="bilingual-content" id="article-content-wrapper">
         {% if structured_article %}
@@ -96,17 +128,29 @@
 <script>
 document.addEventListener('DOMContentLoaded', function() {
     let pythonHasTimestamps = false;
+    let pythonConvertedMp3Path = null;
     try {
         const debugInfoElement = document.getElementById('python-debug-info');
         if (debugInfoElement) {
             const textContent = debugInfoElement.textContent;
-            const jsonPart = textContent.substring(textContent.indexOf(':') + 1).trim();
-            pythonHasTimestamps = JSON.parse(jsonPart);
+            // Simple parsing, assuming structure `Python name: value Python name2: value2`
+            const parts = textContent.split('Python ');
+            parts.forEach(part => {
+                if (part.startsWith('`has_timestamps`:')) {
+                    const jsonPart = part.substring(part.indexOf(':') + 1).trim().split(' Python')[0].trim();
+                    pythonHasTimestamps = JSON.parse(jsonPart);
+                } else if (part.startsWith('`article.converted_mp3_path`:')) {
+                    const jsonPart = part.substring(part.indexOf(':') + 1).trim().split(' Python')[0].trim();
+                    pythonConvertedMp3Path = JSON.parse(jsonPart);
+                }
+            });
         }
     } catch (e) {
         console.error("JS: Error parsing python-debug-info:", e);
     }
-    console.log("JS: Page loaded. Python `has_timestamps` (from hidden div):", pythonHasTimestamps);
+    console.log("JS: Page loaded.");
+    console.log("JS: Python `has_timestamps` (from hidden div):", pythonHasTimestamps);
+    console.log("JS: Python `article.converted_mp3_path` (from hidden div):", pythonConvertedMp3Path);
     
     const articleContentWrapper = document.getElementById('article-content-wrapper');
     const popup = document.getElementById('translation-popup');
