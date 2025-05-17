@@ -6,25 +6,6 @@
     <h1>Book: {{ book.title }}</h1>
     <p><a href="{{ url_for('list_books_page') }}">« Back to All Books</a></p>
 
-    <hr>
-    <h2>Upload New Article to this Book</h2>
-    <p>Upload a .txt file with bilingual content. Optionally, upload a corresponding audio file (.mp3, .mp4, .wav, .m4a) for alignment.</p>
-    <form method="post" enctype="multipart/form-data" action="{{ url_for('book_detail_page', book_id=book.id) }}">
-        <div>
-            <label for="file">Text File (.txt):</label><br>
-            <input type="file" name="file" id="file" required accept=".txt">
-        </div>
-        <br>
-        <div>
-            <label for="audio_file">Audio File (Optional, for alignment):</label><br>
-            <input type="file" name="audio_file" id="audio_file" accept=".mp3,.mp4,.wav,.m4a">
-        </div>
-        <br>
-        <input type="submit" value="Upload and Process Article">
-    </form>
-
-    <hr>
-
     <h2>Articles in "{{ book.title }}"</h2>
     {% if articles %}
         <ul>
@@ -52,4 +33,24 @@
     {% else %}
         <p>No articles uploaded to this book yet. Add one above!</p>
     {% endif %}
+
+    <hr>
+    <h2>Upload New Article to this Book</h2>
+    <p>Upload a .txt file with bilingual content. Optionally, upload a corresponding audio file (.mp3, .mp4, .wav, .m4a) for alignment.</p>
+    <form method="post" enctype="multipart/form-data" action="{{ url_for('book_detail_page', book_id=book.id) }}">
+        <div>
+            <label for="file">Text File (.txt):</label><br>
+            <input type="file" name="file" id="file" required accept=".txt">
+        </div>
+        <br>
+        <div>
+            <label for="audio_file">Audio File (Optional, for alignment):</label><br>
+            <input type="file" name="audio_file" id="audio_file" accept=".mp3,.mp4,.wav,.m4a">
+        </div>
+        <br>
+        <input type="submit" value="Upload and Process Article">
+    </form>
+
+    <hr>
+
 {% endblock %}
