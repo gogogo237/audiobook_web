@@ -5,6 +5,7 @@
 
 {% block head_extra %}
 <style>
+    /* ... (previous styles for audiobook-controls, download-mp3-button, playing-sentence, highlighted-sentence, audio#audioPlayer remain the same) ... */
     .audiobook-controls {
         margin-bottom: 15px;
         padding: 10px;
@@ -14,7 +15,7 @@
     }
     .audiobook-controls label, .audiobook-controls button, .audiobook-controls a {
         margin-right: 10px;
-        vertical-align: middle; /* Align items nicely */
+        vertical-align: middle;
     }
     .download-mp3-button {
         display: inline-block;
@@ -31,26 +32,106 @@
         border: 1px solid transparent;
         border-radius: 4px;
         color: #fff;
-        background-color: #5cb85c; /* Green for download */
+        background-color: #5cb85c;
         border-color: #4cae4c;
-        text-decoration: none; /* For <a> styled as button */
+        text-decoration: none;
     }
     .download-mp3-button:hover {
         background-color: #449d44;
         border-color: #398439;
     }
     .playing-sentence {
-        background-color: #cce5ff; /* Light blue for active audio sentence */
+        background-color: #cce5ff;
     }
-    /* For non-audiobook mode highlighting */
     .highlighted-sentence {
-        background-color: #ffe0b2; /* Original highlight color */
+        background-color: #ffe0b2;
     }
     audio#audioPlayer {
         display: none; 
         width: 100%;
         margin-top: 10px;
     }
+
+
+    /* Contextual Menu Styles - Enhanced */
+    #contextual-menu {
+        display: none;
+        position: absolute;
+        background-color: #ffffff;
+        border: 1px solid #d1d1d1;
+        border-radius: 8px;
+        box-shadow: 0 4px 12px rgba(0,0,0,0.15);
+        z-index: 1001;
+        padding: 6px 0;
+        min-width: 50px; 
+        transition: opacity 0.1s ease-in-out, transform 0.1s ease-in-out; /* Added transform for subtle pop */
+        transform-origin: top left; /* Default, will be adjusted by JS */
+    }
+    .contextual-menu-item {
+        display: flex; 
+        align-items: center; 
+        padding: 10px 15px; 
+        cursor: pointer;
+        font-size: 1.3em; 
+        color: #333;
+        transition: background-color 0.15s ease-in-out;
+        white-space: nowrap; 
+    }
+    .contextual-menu-item:hover {
+        background-color: #f0f2f5; 
+        color: #007bff; 
+    }
+    .contextual-menu-item .menu-icon { 
+        margin-right: 0px; 
+        line-height: 1; 
+    }
+    
+    #translation-popup {
+        display: none;
+        position: absolute;
+        border: 1px solid #aaa;
+        background-color: #f9f9f9;
+        padding: 10px 15px;
+        border-radius: 4px;
+        box-shadow: 0px 2px 8px rgba(0,0,0,0.15);
+        z-index: 1000;
+        max-width: 350px;
+        font-size: 0.95em;
+        color: #333;
+        line-height: 1.5;
+    }
+
+    /* Go Back Button Style */
+    #goBackButton {
+        position: fixed;
+        bottom: 20px; /* Position above where footer actions might have been */
+        right: 20px;
+        background-color: #007bff;
+        color: white;
+        border: none;
+        border-radius: 50%;
+        width: 50px;
+        height: 50px;
+        font-size: 1.5em; /* Icon size */
+        cursor: pointer;
+        box-shadow: 0 2px 10px rgba(0,0,0,0.2);
+        display: none; /* Initially hidden */
+        justify-content: center;
+        align-items: center;
+        z-index: 1002; /* Above contextual menu */
+        transition: opacity 0.2s ease-in-out, transform 0.2s ease-in-out;
+        opacity: 0;
+        transform: scale(0.8);
+    }
+    #goBackButton.visible {
+        display: flex; /* Use flex to center icon */
+        opacity: 1;
+        transform: scale(1);
+    }
+    #goBackButton:hover {
+        background-color: #0056b3;
+    }
+
 </style>
 {% endblock %}
 
@@ -64,11 +145,14 @@
 
     <h1>{{ article.filename }}</h1>
 
+    <button id="goBackButton" title="Go Back to Highlighted Sentence">⬇️</button> 
+    
     <div id="python-debug-info" style="display:none;">
         Python `has_timestamps`: {{ has_timestamps|tojson }}
         Python `article.converted_mp3_path`: {{ article.converted_mp3_path|tojson }}
     </div>
 
+    <!-- ... (rest of the content: audiobook-controls, download button, article-content-wrapper, translation-popup, contextual-menu) ... -->
     {% if has_timestamps %}
     <div class="audiobook-controls">
         <button id="toggleAudiobookMode">Enable Audiobook Mode</button>
@@ -114,18 +198,9 @@
     </div>
 
     <div id="translation-popup"></div>
-{% endblock %}
 
-{% block footer_actions %}
-    <div class="action-buttons-footer">
-        <div class="action-buttons-footer-inner-content">
-            <a href="{{ url_for('list_books_page') }}" class="footer-icon-button" title="Back to Books List">
-                <span class="icon">📚</span> {# Changed icon #}
-            </a>
-            <button id="showTranslationFooterButton" class="footer-icon-button" title="Show Translation for Highlighted Sentence (Tap/Click)">
-                <span class="icon">💬</span>
-            </button>
-        </div>
+    <div id="contextual-menu">
+        <!-- Menu items will be populated by JavaScript or predefined here -->
     </div>
 {% endblock %}
 
@@ -133,6 +208,7 @@
 {% block scripts %}
 <script>
 document.addEventListener('DOMContentLoaded', function() {
+    // ... (previous JS variable initializations: pythonHasTimestamps, pythonConvertedMp3Path, etc.) ...
     let pythonHasTimestamps = false;
     let pythonConvertedMp3Path = null;
     try {
@@ -153,15 +229,14 @@ document.addEventListener('DOMContentLoaded', function() {
     } catch (e) {
         console.error("JS: Error parsing python-debug-info:", e);
     }
-    console.log("JS: Page loaded.");
-    console.log("JS: Python `has_timestamps` (from hidden div):", pythonHasTimestamps);
-    console.log("JS: Python `article.converted_mp3_path` (from hidden div):", pythonConvertedMp3Path);
     
     const articleContentWrapper = document.getElementById('article-content-wrapper');
     const popup = document.getElementById('translation-popup');
-    let highlightedSentence = null;
-    let currentPopupTargetSentence = null; 
-    const showTranslationFooterButton = document.getElementById('showTranslationFooterButton');
+    let highlightedSentence = null; // This will store the DOM element
+    let lastHighlightedSentenceElement = null; // To remember for the "Go Back" button
+    let currentPopupTargetSentence = null;
+    const contextualMenu = document.getElementById('contextual-menu');
+    const goBackButton = document.getElementById('goBackButton');
 
     let audioContext = null;
     let audioBuffer = null;
@@ -175,24 +250,49 @@ document.addEventListener('DOMContentLoaded', function() {
     const audioFileNameSpan = document.getElementById('audioFileName');
     const audiobookHint = document.getElementById('audiobookHint');
 
-    function displayPopup(targetElement, content, isErrorMessage = false) {
+    // --- Go Back Button Logic ---
+    function updateGoBackButtonVisibility() {
+        if (lastHighlightedSentenceElement && (window.scrollY > 100 || document.documentElement.scrollTop > 100)) { // Show if scrolled and sentence was highlighted
+            const sentenceRect = lastHighlightedSentenceElement.getBoundingClientRect();
+            // Show if sentence is not fully visible or scrolled significantly past it
+            if (sentenceRect.bottom < 0 || sentenceRect.top > window.innerHeight || Math.abs(window.scrollY - lastHighlightedSentenceElement.offsetTop) > window.innerHeight / 2) {
+                 goBackButton.classList.add('visible');
+            } else {
+                 goBackButton.classList.remove('visible');
+            }
+        } else {
+            goBackButton.classList.remove('visible');
+        }
+    }
+
+    if (goBackButton) {
+        goBackButton.addEventListener('click', function() {
+            if (lastHighlightedSentenceElement) {
+                lastHighlightedSentenceElement.scrollIntoView({ behavior: 'smooth', block: 'center' });
+                // Highlight it again briefly or ensure it's styled as active
+                if (highlightedSentence) highlightedSentence.classList.remove('highlighted-sentence');
+                lastHighlightedSentenceElement.classList.add('highlighted-sentence');
+                highlightedSentence = lastHighlightedSentenceElement;
+
+                // Optionally hide the go back button after use or let scroll listener handle it
+                setTimeout(() => updateGoBackButtonVisibility(), 500); // Re-check after scroll
+            }
+        });
+        window.addEventListener('scroll', updateGoBackButtonVisibility);
+        window.addEventListener('resize', updateGoBackButtonVisibility);
+    }
+
+    // --- Contextual Menu & Popups ---
+    function displayPopup(targetElement, content) { 
         popup.innerHTML = content;
         const rect = targetElement.getBoundingClientRect();
         popup.style.visibility = 'hidden';
         popup.style.display = 'block';
-        let popupWidth = popup.offsetWidth;
-        let popupHeight = popup.offsetHeight;
-        let popupTop, popupLeft;
-        if (isErrorMessage) {
-            const triggerButtonRect = (targetElement === showTranslationFooterButton) ? 
-                                      showTranslationFooterButton.getBoundingClientRect() : 
-                                      targetElement.getBoundingClientRect(); 
-            popupTop = triggerButtonRect.top - popupHeight - 10 + window.scrollY; 
-            popupLeft = triggerButtonRect.left + (triggerButtonRect.width / 2) - (popupWidth / 2) + window.scrollX;
-        } else { 
-            popupTop = rect.bottom + window.scrollY + 8; 
-            popupLeft = rect.left + window.scrollX + (rect.width / 2) - (popupWidth / 2);
-        }
+        const popupWidth = popup.offsetWidth;
+        const popupHeight = popup.offsetHeight;
+        let popupTop = rect.bottom + window.scrollY + 8;
+        let popupLeft = rect.left + window.scrollX + (rect.width / 2) - (popupWidth / 2);
+
         const minLeft = 10 + window.scrollX;
         const viewportWidth = window.innerWidth;
         let maxLeft = window.scrollX + viewportWidth - popupWidth - 10;
@@ -202,12 +302,6 @@ document.addEventListener('DOMContentLoaded', function() {
         const viewportHeight = window.innerHeight;
         if (popupTop + popupHeight > window.scrollY + viewportHeight - 10) {
             let alternativeTop = rect.top - popupHeight - 8 + window.scrollY;
-            if (isErrorMessage) {
-                const triggerButtonRect = (targetElement === showTranslationFooterButton) ? 
-                                          showTranslationFooterButton.getBoundingClientRect() : 
-                                          targetElement.getBoundingClientRect();
-                alternativeTop = triggerButtonRect.top - popupHeight - 10 + window.scrollY;
-            }
             if (alternativeTop > window.scrollY + 10) {
                 popupTop = alternativeTop;
             } else { 
@@ -219,160 +313,248 @@ document.addEventListener('DOMContentLoaded', function() {
         popup.style.visibility = 'visible';
     }
 
+    function hideContextualMenu() {
+        if (contextualMenu) {
+            contextualMenu.style.opacity = '0'; 
+            contextualMenu.style.transform = 'scale(0.95)'; // Shrink slightly on hide
+            setTimeout(() => { 
+                contextualMenu.style.display = 'none';
+            }, 100); 
+        }
+    }
+
+    function hideTranslationPopup() {
+        if (popup) {
+            popup.style.display = 'none';
+            currentPopupTargetSentence = null;
+        }
+    }
+
+    function populateAndShowContextualMenu(sentenceElement, clickX) {
+        if (!contextualMenu || !sentenceElement) return;
+
+        let menuHTML = `<div class="contextual-menu-item" data-action="show-translation" title="Show Chinese Translation"><span class="menu-icon">💬</span></div>`;
+        menuHTML += `<div class="contextual-menu-item" data-action="go-to-top" title="Go to Top"><span class="menu-icon">⬆️</span></div>`;
+
+        if (isAudiobookMode && audioContext && audioBuffer && pythonHasTimestamps) {
+            let audioIcon = "▶️"; 
+            let audioTitle = "Play Sentence Audio";
+            if (currentPlayingSentence === sentenceElement && currentSourceNode) {
+                audioIcon = "⏹️"; 
+                audioTitle = "Stop Sentence Audio";
+            }
+            menuHTML += `<div class="contextual-menu-item" data-action="play-pause-audio" title="${audioTitle}"><span class="menu-icon">${audioIcon}</span></div>`;
+        }
+
+        contextualMenu.innerHTML = menuHTML;
+        contextualMenu.style.display = 'block'; 
+        contextualMenu.style.opacity = '0'; 
+        contextualMenu.style.transform = 'scale(0.95)'; // Initial state for pop animation
+
+        const rect = sentenceElement.getBoundingClientRect();
+        const menuWidth = contextualMenu.offsetWidth;
+        const menuHeight = contextualMenu.offsetHeight;
+        
+        let menuTop = rect.bottom + window.scrollY + 5; 
+        let menuLeft;
+
+        // Decide left/right based on clickX relative to viewport center
+        const viewportCenterX = window.innerWidth / 2;
+        if (clickX < viewportCenterX) { // Click on left half, menu on right of sentence
+            menuLeft = rect.left + window.scrollX;
+            contextualMenu.style.transformOrigin = 'top left';
+        } else { // Click on right half, menu on left of sentence
+            menuLeft = rect.right + window.scrollX - menuWidth;
+            contextualMenu.style.transformOrigin = 'top right';
+        }
+        
+        // Boundary adjustments
+        if (menuLeft < window.scrollX + 10) menuLeft = window.scrollX + 10;
+        if (menuLeft + menuWidth > window.innerWidth + window.scrollX - 10) {
+            menuLeft = window.innerWidth + window.scrollX - menuWidth - 10;
+        }
+        if (menuTop + menuHeight > window.innerHeight + window.scrollY - 10) {
+            menuTop = rect.top + window.scrollY - menuHeight - 5; 
+        }
+        if (menuTop < window.scrollY + 10) menuTop = window.scrollY + 10;
+
+        contextualMenu.style.top = menuTop + 'px';
+        contextualMenu.style.left = menuLeft + 'px';
+        setTimeout(() => { 
+             contextualMenu.style.opacity = '1';
+             contextualMenu.style.transform = 'scale(1)'; // Pop to full size
+        }, 10);
+    }
+
     if (articleContentWrapper) {
         articleContentWrapper.addEventListener('contextmenu', function(event) {
             const targetSentence = event.target.closest('.english-sentence');
             if (targetSentence) {
                 event.preventDefault();
+                hideContextualMenu(); 
                 const translation = targetSentence.dataset.translation;
                 if (translation) {
                     displayPopup(targetSentence, translation);
                     currentPopupTargetSentence = targetSentence;
                 } else {
-                    displayPopup(targetSentence, "No translation available for this sentence.", true);
+                    displayPopup(targetSentence, "No translation available for this sentence.");
                 }
                 if (!isAudiobookMode) {
                     if (highlightedSentence) highlightedSentence.classList.remove('highlighted-sentence');
                     targetSentence.classList.add('highlighted-sentence');
                     highlightedSentence = targetSentence;
+                    lastHighlightedSentenceElement = targetSentence; // Remember for go back
+                    updateGoBackButtonVisibility();
                 }
             } else {
-                if (popup.style.display === 'block') {
-                    popup.style.display = 'none';
-                    currentPopupTargetSentence = null;
-                }
+                hideTranslationPopup();
             }
         });
 
         articleContentWrapper.addEventListener('click', function(event) {
-            if (popup.style.display === 'block' && !popup.contains(event.target) && 
-                !event.target.closest('.english-sentence') && !event.target.closest('.footer-icon-button')) {
-                popup.style.display = 'none';
-                currentPopupTargetSentence = null;
-            }
-
             const targetSentence = event.target.closest('.english-sentence');
+
             if (targetSentence) {
-                if (isAudiobookMode && audioContext && audioBuffer) { 
-                    playSentenceAudio(targetSentence);
-                } else if (isAudiobookMode && (!audioContext || !audioBuffer)) {
-                    alert("Audio not loaded or ready. Please select an audio file.");
-                } else { 
-                    if (highlightedSentence === targetSentence) {
-                        targetSentence.classList.remove('highlighted-sentence');
-                        highlightedSentence = null;
-                        if (popup.style.display === 'block' && currentPopupTargetSentence === targetSentence) {
-                            popup.style.display = 'none';
-                            currentPopupTargetSentence = null;
-                        }
-                    } else { 
-                        if (highlightedSentence) {
-                            highlightedSentence.classList.remove('highlighted-sentence');
-                        }
-                        targetSentence.classList.add('highlighted-sentence');
-                        highlightedSentence = targetSentence;
-                        if (popup.style.display === 'block' && currentPopupTargetSentence !== targetSentence) {
-                             popup.style.display = 'none';
-                             currentPopupTargetSentence = null;
-                        }
-                    }
-                }
-            } else { 
-                if (!isAudiobookMode && highlightedSentence) { 
-                    highlightedSentence.classList.remove('highlighted-sentence');
-                    highlightedSentence = null;
-                }
-                if (popup.style.display === 'block' && !popup.contains(event.target) && !event.target.closest('.footer-icon-button')) {
-                    popup.style.display = 'none';
-                    currentPopupTargetSentence = null;
-                }
-            }
-        });
-    }
+                event.stopPropagation(); 
+                hideTranslationPopup(); 
 
-    if (showTranslationFooterButton) {
-        showTranslationFooterButton.addEventListener('click', function(event) {
-            event.stopPropagation(); 
-            
-            let sentenceToTranslate = null;
-            if (isAudiobookMode && currentPlayingSentence) {
-                sentenceToTranslate = currentPlayingSentence;
-            } else if (highlightedSentence) {
-                sentenceToTranslate = highlightedSentence;
-            }
-
-            if (sentenceToTranslate) {
-                if (popup.style.display === 'block' && currentPopupTargetSentence === sentenceToTranslate) {
-                    popup.style.display = 'none';
-                    currentPopupTargetSentence = null;
-                } else {
-                    const translation = sentenceToTranslate.dataset.translation;
-                    if (translation) {
-                        displayPopup(sentenceToTranslate, translation);
-                        currentPopupTargetSentence = sentenceToTranslate;
+                if (highlightedSentence === targetSentence) {
+                    if (contextualMenu.style.display === 'block' && contextualMenu.style.opacity === '1') {
+                        hideContextualMenu();
                     } else {
-                        displayPopup(sentenceToTranslate, 'Translation not found for the selected sentence.', true); 
-                        currentPopupTargetSentence = null; 
+                        populateAndShowContextualMenu(targetSentence, event.clientX);
+                    }
+                } else {
+                    if (highlightedSentence) {
+                        highlightedSentence.classList.remove('highlighted-sentence');
+                    }
+                    highlightedSentence = targetSentence;
+                    lastHighlightedSentenceElement = targetSentence; // Remember for go back
+                    highlightedSentence.classList.add('highlighted-sentence');
+                    hideContextualMenu(); 
+                    updateGoBackButtonVisibility();
+
+
+                    if (isAudiobookMode && audioContext && audioBuffer) {
+                        playSentenceAudio(targetSentence);
+                    } else if (isAudiobookMode && (!audioContext || !audioBuffer)) {
+                        console.log("JS: Audiobook mode active, but audio not loaded/ready.");
                     }
                 }
             } else {
-                if (popup.style.display === 'block' && popup.innerHTML.includes('Please select an English sentence first')) {
-                     popup.style.display = 'none';
-                     currentPopupTargetSentence = null;
-                } else {
-                    displayPopup(showTranslationFooterButton, 'Please select an English sentence first by clicking on it.', true); 
-                    currentPopupTargetSentence = null; 
+                if (!contextualMenu.contains(event.target)) { 
+                    hideContextualMenu();
+                }
+                if (!popup.contains(event.target)) { 
+                    hideTranslationPopup();
+                }
+                // Deselect sentence if clicked outside of sentence, menu, or popup
+                if (highlightedSentence && 
+                    !contextualMenu.contains(event.target) && 
+                    !popup.contains(event.target) &&
+                    !goBackButton.contains(event.target) ) { // And not go back button
+                    highlightedSentence.classList.remove('highlighted-sentence');
+                    highlightedSentence = null;
+                    // Don't clear lastHighlightedSentenceElement here, so "Go Back" still works
+                    updateGoBackButtonVisibility(); 
                 }
             }
         });
     }
-    
-    document.addEventListener('click', function(event) {
-        if (popup.style.display === 'block' && 
-            !popup.contains(event.target) && 
-            !event.target.closest('.english-sentence') && 
-            !event.target.closest('#showTranslationFooterButton') && 
-            !event.target.closest('.footer-icon-button')) { 
-            popup.style.display = 'none';
-            currentPopupTargetSentence = null;
-        }
-    });
 
+    if (contextualMenu) {
+        contextualMenu.addEventListener('click', function(event) {
+            event.stopPropagation(); 
+            const actionTarget = event.target.closest('.contextual-menu-item');
+            if (!actionTarget || !highlightedSentence) {
+                hideContextualMenu();
+                return;
+            }
+
+            const action = actionTarget.dataset.action;
+            switch (action) {
+                case 'go-to-top':
+                    window.scrollTo({ top: 0, behavior: 'smooth' });
+                    // After scrolling to top, make sure the "Go Back" button is visible
+                    // if lastHighlightedSentenceElement exists.
+                    setTimeout(updateGoBackButtonVisibility, 100); // Allow scroll to potentially finish
+                    break;
+                case 'show-translation':
+                    const translation = highlightedSentence.dataset.translation;
+                    if (translation) {
+                        displayPopup(highlightedSentence, translation);
+                        currentPopupTargetSentence = highlightedSentence;
+                    } else {
+                        displayPopup(highlightedSentence, 'No translation available.');
+                    }
+                    break;
+                case 'play-pause-audio':
+                    if (isAudiobookMode && audioContext && audioBuffer && pythonHasTimestamps) {
+                        const iconSpan = actionTarget.querySelector('.menu-icon');
+                        if (currentPlayingSentence === highlightedSentence && currentSourceNode) {
+                            if (currentSourceNode) {
+                                try { currentSourceNode.onended = null; currentSourceNode.stop(); currentSourceNode.disconnect(); } catch(e){}
+                                currentSourceNode = null;
+                            }
+                            if (currentPlayingSentence) currentPlayingSentence.classList.remove('playing-sentence');
+                            if (iconSpan) iconSpan.textContent = "▶️";
+                            actionTarget.title = "Play Sentence Audio";
+                        } else {
+                            playSentenceAudio(highlightedSentence);
+                            if (iconSpan) iconSpan.textContent = "⏹️";
+                            actionTarget.title = "Stop Sentence Audio";
+                        }
+                    }
+                    break;
+            }
+            hideContextualMenu();
+        });
+    }
+
+    if (popup) { 
+        popup.addEventListener('click', function() {
+            hideTranslationPopup();
+        });
+    }
+
+    document.addEventListener('click', function(event) {
+        if (contextualMenu.style.display === 'block' &&
+            !contextualMenu.contains(event.target) &&
+            !event.target.closest('.english-sentence')) {
+            hideContextualMenu();
+        }
+
+        if (popup.style.display === 'block' &&
+            !popup.contains(event.target) &&
+            !event.target.closest('.english-sentence') && 
+            !(contextualMenu.style.display === 'block' && contextualMenu.contains(event.target))) { 
+            hideTranslationPopup();
+        }
+        updateGoBackButtonVisibility(); // Check on any click
+    });
+    
+    // --- Audiobook Mode Logic (largely unchanged, ensure it calls updateGoBackButtonVisibility if needed) ---
     if (toggleAudiobookModeButton) {
+        // ... initAudioContext, maxSentenceEndTime calculation ... (as before)
         function initAudioContext() {
             if (!audioContext) {
                 try {
                     audioContext = new (window.AudioContext || window.webkitAudioContext)();
-                    console.log("JS: AudioContext initialized.");
                 } catch (e) {
-                    console.error("JS: Error initializing AudioContext:", e);
-                    alert("Web Audio API is not supported by this browser.");
-                    return false;
+                    alert("Web Audio API is not supported by this browser."); return false;
                 }
             }
-            if (audioContext.state === 'suspended') {
-                audioContext.resume().then(() => {
-                    console.log("JS: AudioContext resumed.");
-                }).catch(e => console.error("JS: Error resuming AudioContext on init:", e));
-            }
+            if (audioContext.state === 'suspended') audioContext.resume();
             return true;
         }
         
-        console.log("JS: Audiobook controls found. Calculating maxSentenceEndTime.");
         document.querySelectorAll('.english-sentence').forEach(s => {
-            const endTimeStr = s.dataset.endTimeMs; 
-            if (endTimeStr) { 
-                const endTime = parseInt(endTimeStr, 10);
-                if (!isNaN(endTime) && endTime > maxSentenceEndTime) maxSentenceEndTime = endTime;
-            }
+            const endTime = parseInt(s.dataset.endTimeMs, 10);
+            if (!isNaN(endTime) && endTime > maxSentenceEndTime) maxSentenceEndTime = endTime;
         });
-        console.log(`JS: MaxSentenceEndTime calculation complete: ${maxSentenceEndTime}.`);
 
         toggleAudiobookModeButton.addEventListener('click', function() {
-            if (!initAudioContext() && !isAudiobookMode) { 
-                return;
-            }
-
+            if (!initAudioContext() && !isAudiobookMode) return;
             isAudiobookMode = !isAudiobookMode;
             if (isAudiobookMode) {
                 toggleAudiobookModeButton.textContent = 'Disable Audiobook Mode';
@@ -380,137 +562,98 @@ document.addEventListener('DOMContentLoaded', function() {
                 audiobookHint.style.display = 'block';
                 if (highlightedSentence) {
                     highlightedSentence.classList.remove('highlighted-sentence');
-                    highlightedSentence = null;
-                }
-                if (popup.style.display === 'block') {
-                    popup.style.display = 'none';
-                    currentPopupTargetSentence = null;
+                    highlightedSentence = null; // Don't affect lastHighlightedSentenceElement
                 }
             } else { 
                 toggleAudiobookModeButton.textContent = 'Enable Audiobook Mode';
                 localAudioFileInput.style.display = 'none';
                 audiobookHint.style.display = 'none';
-                if (currentSourceNode) {
-                    try {
-                        currentSourceNode.onended = null;
-                        currentSourceNode.stop();
-                        currentSourceNode.disconnect();
-                    } catch(e) { console.warn("JS: Error stopping source on mode disable", e); }
-                    currentSourceNode = null;
-                }
-                if (currentPlayingSentence) {
-                    currentPlayingSentence.classList.remove('playing-sentence');
-                    currentPlayingSentence = null;
-                }
+                if (currentSourceNode) { try { currentSourceNode.stop(); } catch(e){} currentSourceNode = null; }
+                if (currentPlayingSentence) currentPlayingSentence.classList.remove('playing-sentence');
+                currentPlayingSentence = null;
             }
+            hideContextualMenu(); 
+            hideTranslationPopup();
+            updateGoBackButtonVisibility();
         });
 
+        // ... localAudioFileInput change listener ... (as before)
         localAudioFileInput.addEventListener('change', async function(event) {
-            if (!audioContext) { 
-                if (!initAudioContext()) {
-                    alert("Could not initialize audio system. Please try enabling audiobook mode first.");
-                    return;
-                }
-            }
+            if (!audioContext && !initAudioContext()) return;
             const file = event.target.files[0];
             if (file) {
                 audioFileNameSpan.textContent = "Loading: " + file.name;
-                if (currentSourceNode) {
-                    try {
-                        currentSourceNode.onended = null; currentSourceNode.stop(); currentSourceNode.disconnect();
-                    } catch(e) { /* ignore */ }
-                    currentSourceNode = null;
-                }
-                if (currentPlayingSentence) {
-                    currentPlayingSentence.classList.remove('playing-sentence');
-                    currentPlayingSentence = null;
-                }
+                if (currentSourceNode) { try { currentSourceNode.stop(); } catch(e){} currentSourceNode = null; }
+                if (currentPlayingSentence) currentPlayingSentence.classList.remove('playing-sentence');
+                currentPlayingSentence = null;
                 audioBuffer = null; 
-
                 try {
                     const arrayBuffer = await file.arrayBuffer();
                     audioBuffer = await audioContext.decodeAudioData(arrayBuffer);
                     audioFileNameSpan.textContent = file.name;
-                    console.log("JS (Web Audio): Audio file decoded. Duration:", audioBuffer.duration.toFixed(3) + "s");
-                    if (maxSentenceEndTime > 0 && (audioBuffer.duration * 1000 < maxSentenceEndTime)) {
-                        alert(`Warning: Audio duration (${(audioBuffer.duration).toFixed(2)}s) is shorter than max sentence end time (${(maxSentenceEndTime/1000).toFixed(2)}s).`);
+                     if (maxSentenceEndTime > 0 && (audioBuffer.duration * 1000 < maxSentenceEndTime)) {
+                        alert(`Warning: Audio duration shorter than max sentence time.`);
                     }
                 } catch (e) {
-                    console.error("JS (Web Audio): Error decoding audio data:", e);
-                    alert(`Error decoding audio file "${file.name}": ${e.message}`);
+                    alert(`Error decoding audio: ${e.message}`);
                     audioFileNameSpan.textContent = "Error loading: " + file.name;
                     audioBuffer = null;
                 }
             }
         });
 
+        // ... playSentenceAudio, proceedWithPlayback ... (as before, but update menu if audio ends)
         function playSentenceAudio(sentenceElement) {
-            if (!audioContext || audioContext.state === 'closed') {
-                console.error("JS (Web Audio): AudioContext error."); alert("Audio system error."); return;
-            }
+            if (!audioContext || audioContext.state === 'closed') { alert("Audio system error."); return; }
             if (audioContext.state === 'suspended') {
                 audioContext.resume().then(() => proceedWithPlayback(sentenceElement))
-                                  .catch(e => { console.error("JS: Resume AudioContext failed:", e); alert("Could not start audio."); });
+                                  .catch(e => { alert("Could not start audio."); });
             } else {
                 proceedWithPlayback(sentenceElement);
             }
         }
         
         function proceedWithPlayback(sentenceElement) {
-            console.log("JS (Web Audio): playSentenceAudio for:", sentenceElement.textContent.substring(0,30));
             if (!audioBuffer) { alert("Please load an audio file."); return; }
-            if (!isAudiobookMode) { console.warn("JS: Not in audiobook mode for playback."); return; }
-
-            if (currentSourceNode) {
-                try {
-                    currentSourceNode.onended = null; currentSourceNode.stop(); currentSourceNode.disconnect();
-                } catch (e) { /* ignore */ }
-            }
+            if (currentSourceNode) { try { currentSourceNode.onended = null; currentSourceNode.stop(); } catch (e) {} }
             if (currentPlayingSentence && currentPlayingSentence !== sentenceElement) {
                 currentPlayingSentence.classList.remove('playing-sentence');
             }
 
-            const startTimeStr = sentenceElement.dataset.startTimeMs;
-            const endTimeStr = sentenceElement.dataset.endTimeMs;
-            if (!startTimeStr || !endTimeStr) { alert("Sentence missing time data."); return; }
-
-            const startTimeMs = parseInt(startTimeStr, 10);
-            const endTimeMs = parseInt(endTimeStr, 10);
-            if (isNaN(startTimeMs) || isNaN(endTimeMs)) { alert("Invalid time data."); return; }
+            const startTimeMs = parseInt(sentenceElement.dataset.startTimeMs, 10);
+            const endTimeMs = parseInt(sentenceElement.dataset.endTimeMs, 10);
+            if (isNaN(startTimeMs) || isNaN(endTimeMs)) { alert("Sentence missing time data."); return; }
 
             const offsetInSeconds = startTimeMs / 1000.0;
             let durationInSeconds = (endTimeMs - startTimeMs) / 1000.0;
-
-            if (offsetInSeconds < 0 || offsetInSeconds >= audioBuffer.duration) {
-                alert("Sentence start time out of audio bounds."); return;
-            }
-            if (durationInSeconds <= 0) { 
-                console.warn(`JS (Web Audio): Corrected duration to minimal if non-positive: ${durationInSeconds}s.`);
-                durationInSeconds = 0.05; 
-            }
+            if (offsetInSeconds < 0 || offsetInSeconds >= audioBuffer.duration) { alert("Sentence start time out of audio bounds."); return; }
+            if (durationInSeconds <= 0) durationInSeconds = 0.05; 
             const clampedDuration = Math.min(durationInSeconds, audioBuffer.duration - offsetInSeconds);
 
             currentPlayingSentence = sentenceElement;
             currentPlayingSentence.classList.add('playing-sentence');
-
             currentSourceNode = audioContext.createBufferSource();
             currentSourceNode.buffer = audioBuffer;
             currentSourceNode.connect(audioContext.destination);
-            console.log(`JS (Web Audio): Starting. Offset: ${offsetInSeconds.toFixed(3)}s, Duration: ${clampedDuration.toFixed(3)}s`);
             
             try {
                 currentSourceNode.start(0, offsetInSeconds, clampedDuration); 
             } catch (e) {
-                console.error("JS (Web Audio): Error on sourceNode.start():", e);
                 alert(`Could not start playback: ${e.message}`);
                 if (currentPlayingSentence) currentPlayingSentence.classList.remove('playing-sentence');
-                currentPlayingSentence = null;
-                return;
+                currentPlayingSentence = null; return;
             }
             
             currentSourceNode.onended = () => {
-                console.log(`JS (Web Audio): Playback ended (onended) for: ${sentenceElement.textContent.substring(0,30)}. Highlight remains.`);
-            };
+                if (contextualMenu.style.display === 'block' && highlightedSentence === sentenceElement) {
+                    const audioButtonIcon = contextualMenu.querySelector('.contextual-menu-item[data-action="play-pause-audio"] .menu-icon');
+                    if (audioButtonIcon) audioButtonIcon.textContent = "▶️";
+                    const audioButton = contextualMenu.querySelector('.contextual-menu-item[data-action="play-pause-audio"]');
+                    if(audioButton) audioButton.title = "Play Sentence Audio";
+                }
+                // Don't remove 'playing-sentence' class here if we want highlight to persist after audio ends
+                // Only remove it if another sentence is played or mode changes.
+            }; 
         } 
     } else {
         console.log("JS: toggleAudiobookModeButton not found.");
