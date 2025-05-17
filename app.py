@@ -604,5 +604,5 @@ if __name__ == '__main__':
     # app.run(debug=True, host='0.0.0.0', port=5000) 
 
     # MODIFIED LINE FOR AD-HOC SSL:
-    app.run(debug=True, host='0.0.0.0', port=5000, ssl_context='adhoc')
+    app.run(debug=True, host='0.0.0.0', port=5002, ssl_context='adhoc')
     app.logger.info("Flask app is now running with ad-hoc SSL (HTTPS).")
