@@ -1,4 +1,3 @@
-# bilingual_app/app.py
 import os
 import tempfile
 import shutil 
@@ -221,7 +220,7 @@ def book_detail_page(book_id):
         app.logger.warning(f"APP: Book ID {book_id} not found for viewing.")
         return redirect(url_for('list_books_page'))
 
-    if request.method == 'POST': # This is for uploading an article to THIS book
+    if request.method == 'POST': 
         if 'file' not in request.files:
             flash('No text file part.', 'danger')
             return redirect(url_for('book_detail_page', book_id=book_id))
@@ -231,7 +230,7 @@ def book_detail_page(book_id):
             flash('No text file selected.', 'danger')
             return redirect(url_for('book_detail_page', book_id=book_id))
         
-        article_id_processed = None # Use a different name to avoid confusion with loop var if any
+        article_id_processed = None 
         raw_bilingual_text_content = None
         article_title_for_db = None
         article_safe_stem_for_files = None
@@ -310,15 +309,23 @@ def book_detail_page(book_id):
         
         return redirect(url_for('book_detail_page', book_id=book_id))
 
-    # GET request for book_detail_page
+    # GET request
+    articles_for_book = []
+    currently_reading_article_id = None
     try:
         articles_for_book = db_manager.get_articles_for_book(book_id)
+        most_recent_location = db_manager.get_most_recent_reading_location_for_book(book_id, app_logger=app.logger)
+        if most_recent_location:
+            currently_reading_article_id = most_recent_location['article_id']
+            app.logger.info(f"APP: For book {book_id}, currently reading article ID is {currently_reading_article_id}")
     except Exception as e:
-        app.logger.error(f"APP: Error fetching articles for book ID {book_id}: {e}", exc_info=True)
-        flash(f"Could not retrieve articles for book '{book['title']}'.", "danger")
-        articles_for_book = []
+        app.logger.error(f"APP: Error fetching articles or reading location for book ID {book_id}: {e}", exc_info=True)
+        flash(f"Could not retrieve articles or reading status for book '{book['title']}'.", "danger")
         
-    return render_template('book_detail.html', book=book, articles=articles_for_book)
+    return render_template('book_detail.html', 
+                           book=book, 
+                           articles=articles_for_book,
+                           currently_reading_article_id=currently_reading_article_id)
 
 
 @app.route('/article/<int:article_id>/align_audio', methods=['GET', 'POST'])
@@ -372,10 +379,9 @@ def view_article(article_id):
     book = None
     if article['book_id']:
         book = db_manager.get_book_by_id(article['book_id'])
-    if not book and article['book_id']: # Book ID exists but book not found
+    if not book and article['book_id']: 
         app.logger.warning(f"APP: Book ID {article['book_id']} for article {article_id} not found. Article might be orphaned.")
         flash(f"Warning: The book associated with article '{article['filename']}' could not be found.", "warning")
-
 
     article_filename = article['filename']
     try:
@@ -383,25 +389,27 @@ def view_article(article_id):
     except Exception as e:
         app.logger.error(f"APP: Error fetching sentences for article {article_id} ('{article_filename}'): {e}", exc_info=True)
         flash(f"Error retrieving content for article '{article_filename}'.", "danger")
-        return redirect(url_for('list_books_page')) # Or book detail page if book is known
+        return redirect(url_for('list_books_page')) 
     
     structured_article_content = []
-    current_paragraph_index = -1
+    current_paragraph_db_index = -1 
     current_paragraph_sentences = []
     has_timestamps = False 
 
     for sentence_row in sentences_from_db:
-        if sentence_row['paragraph_index'] != current_paragraph_index:
+        if sentence_row['paragraph_index'] != current_paragraph_db_index:
             if current_paragraph_sentences:
                 structured_article_content.append(current_paragraph_sentences)
             current_paragraph_sentences = []
-            current_paragraph_index = sentence_row['paragraph_index']
+            current_paragraph_db_index = sentence_row['paragraph_index']
         
         sentence_pair = {
             'english': sentence_row['english_text'],
             'chinese': sentence_row['chinese_text'],
             'start_time_ms': sentence_row['start_time_ms'],
-            'end_time_ms': sentence_row['end_time_ms']
+            'end_time_ms': sentence_row['end_time_ms'],
+            'paragraph_index': sentence_row['paragraph_index'], 
+            'sentence_index_in_paragraph': sentence_row['sentence_index_in_paragraph']
         }
         current_paragraph_sentences.append(sentence_pair)
 
@@ -411,12 +419,52 @@ def view_article(article_id):
     if current_paragraph_sentences: 
         structured_article_content.append(current_paragraph_sentences)
     
-    app.logger.debug(f"APP: Rendering article.html for ID {article_id}. `has_timestamps` is: {has_timestamps}")
+    reading_location_from_db = db_manager.get_reading_location(article_id, app_logger=app.logger)
+    reading_location_for_template = dict(reading_location_from_db) if reading_location_from_db else None
+
+    app.logger.debug(f"APP: Rendering article.html for ID {article_id}. `has_timestamps` is: {has_timestamps}. Reading location: {reading_location_for_template}")
     return render_template('article.html',
                            article=article,
                            book=book, 
                            structured_article=structured_article_content,
-                           has_timestamps=has_timestamps)
+                           has_timestamps=has_timestamps,
+                           reading_location=reading_location_for_template)
+
+
+@app.route('/article/<int:article_id>/save_location', methods=['POST'])
+def save_reading_location(article_id):
+    article = db_manager.get_article_by_id(article_id)
+    if not article:
+        app.logger.warning(f"APP: Attempt to save reading location for non-existent article ID: {article_id}")
+        return jsonify({'status': 'error', 'message': 'Article not found'}), 404
+    
+    if not article['book_id']:
+        app.logger.error(f"APP: Cannot save reading location for article {article_id} (title: '{article['filename']}') as it has no associated book_id.")
+        return jsonify({'status': 'error', 'message': 'Article is not associated with a book.'}), 400
+    
+    book_id_for_location = article['book_id']
+    data = request.get_json()
+    if not data or 'paragraph_index' not in data or 'sentence_index_in_paragraph' not in data:
+        app.logger.warning(f"APP: Invalid data for saving reading location for article {article_id}: {data}")
+        return jsonify({'status': 'error', 'message': 'Missing paragraph or sentence index'}), 400
+        
+    p_idx = data.get('paragraph_index')
+    s_idx = data.get('sentence_index_in_paragraph')
+
+    try:
+        p_idx = int(p_idx)
+        s_idx = int(s_idx)
+    except (ValueError, TypeError):
+        app.logger.warning(f"APP: Invalid index types for saving reading location for article {article_id}: P:{p_idx}, S:{s_idx}")
+        return jsonify({'status': 'error', 'message': 'Invalid index types'}), 400
+
+    try:
+        db_manager.set_reading_location(article_id, book_id_for_location, p_idx, s_idx, app_logger=app.logger)
+        app.logger.info(f"APP: Successfully saved reading location for article {article_id} (book {book_id_for_location}) at P:{p_idx}, S:{s_idx}.")
+        return jsonify({'status': 'success', 'message': 'Reading location saved.'})
+    except Exception as e:
+        app.logger.error(f"APP: Failed to save reading location for article {article_id} (book {book_id_for_location}): {e}", exc_info=True)
+        return jsonify({'status': 'error', 'message': f'Failed to save location: {str(e)}'}), 500
 
 
 @app.route('/article/<int:article_id>/download_mp3')

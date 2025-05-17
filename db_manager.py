@@ -1,4 +1,3 @@
-# bilingual_app/db_manager.py
 import sqlite3
 import os
 import datetime # Import the datetime module
@@ -34,7 +33,7 @@ def get_db_connection():
     return conn
 
 def init_db(app=None):
-    """Initializes the database schema for books, articles, and sentences."""
+    """Initializes the database schema for books, articles, sentences, and reading locations."""
     conn = get_db_connection()
     cursor = conn.cursor()
 
@@ -62,24 +61,22 @@ def init_db(app=None):
                 upload_timestamp DATETIME DEFAULT CURRENT_TIMESTAMP,
                 processed_srt_path TEXT NULLABLE,
                 converted_mp3_path TEXT NULLABLE,
-                FOREIGN KEY (book_id) REFERENCES books (id)
+                FOREIGN KEY (book_id) REFERENCES books (id) ON DELETE RESTRICT 
             )
-        ''')
+        ''') # Using ON DELETE RESTRICT for book_id FK by default
     elif 'book_id' not in articles_columns: # 'articles' table exists, but no 'book_id' column
         if app: app.logger.info("DB: 'articles' table exists but 'book_id' column is missing. Adding 'book_id' as NULLABLE.")
         try:
-            # Add book_id as NULLABLE initially for existing data. New articles will require it.
-            cursor.execute("ALTER TABLE articles ADD COLUMN book_id INTEGER NULLABLE REFERENCES books(id)")
-            if app: app.logger.info("DB: Added 'book_id' (NULLABLE) column to 'articles' table. Existing articles will have NULL book_id and may require manual assignment or will not be accessible via book views until updated.")
+            cursor.execute("ALTER TABLE articles ADD COLUMN book_id INTEGER NULLABLE REFERENCES books(id) ON DELETE RESTRICT")
+            if app: app.logger.info("DB: Added 'book_id' (NULLABLE) column to 'articles' table. Existing articles will have NULL book_id.")
         except sqlite3.OperationalError as e:
             if "duplicate column name" in str(e).lower():
                  if app: app.logger.info("DB: Column 'book_id' already exists in 'articles' table (detected during ALTER attempt).")
             elif app: 
                 app.logger.error(f"DB: Failed to add 'book_id' to 'articles' table: {e}", exc_info=True)
-    else: # 'articles' table exists and 'book_id' column exists
+    else: 
         if app: app.logger.info("DB: 'articles' table exists and 'book_id' column is present.")
             
-    # Ensure converted_mp3_path exists in articles (from original code, check if needed during migration)
     if articles_columns and 'converted_mp3_path' not in articles_columns:
         try:
             cursor.execute("ALTER TABLE articles ADD COLUMN converted_mp3_path TEXT NULLABLE")
@@ -89,7 +86,6 @@ def init_db(app=None):
                 if app: app.logger.info("DB: Column 'converted_mp3_path' already exists in 'articles' table (detected during ALTER attempt).")
             elif app:
                 app.logger.error(f"DB: Failed to add 'converted_mp3_path' to 'articles' table: {e}", exc_info=True)
-
 
     # 3. Create sentences table (if not exists)
     cursor.execute('''
@@ -107,6 +103,87 @@ def init_db(app=None):
     ''')
     if app: app.logger.info("DB: Checked/created 'sentences' table.")
 
+    # 4. Create/Update reading_locations table
+    cursor.execute("PRAGMA table_info(reading_locations)")
+    reading_locations_columns = {col['name']: col for col in cursor.fetchall()}
+
+    if not reading_locations_columns: # Table doesn't exist, create with new schema
+        if app: app.logger.info("DB: 'reading_locations' table not found. Creating new table with 'book_id'.")
+        cursor.execute('''
+            CREATE TABLE reading_locations (
+                article_id INTEGER PRIMARY KEY,
+                book_id INTEGER NOT NULL,
+                paragraph_index INTEGER NOT NULL,
+                sentence_index_in_paragraph INTEGER NOT NULL,
+                last_updated DATETIME DEFAULT CURRENT_TIMESTAMP,
+                FOREIGN KEY (article_id) REFERENCES articles (id) ON DELETE CASCADE,
+                FOREIGN KEY (book_id) REFERENCES books (id) ON DELETE CASCADE
+            )
+        ''')
+        if app: app.logger.info("DB: Created 'reading_locations' table with 'book_id' and foreign key constraints.")
+    elif 'book_id' not in reading_locations_columns:
+        if app: app.logger.info("DB: 'reading_locations' table missing 'book_id'. Attempting to recreate table and migrate data.")
+        
+        temp_table_name = "reading_locations_old_migration"
+        renamed_successfully = False
+        try:
+            # Drop if previous migration failed and left temp table
+            cursor.execute(f"DROP TABLE IF EXISTS {temp_table_name}")
+            cursor.execute(f"ALTER TABLE reading_locations RENAME TO {temp_table_name}")
+            if app: app.logger.info(f"DB: Renamed 'reading_locations' to '{temp_table_name}'.")
+            renamed_successfully = True
+        except sqlite3.Error as e:
+            if app: app.logger.error(f"DB: Error preparing for 'reading_locations' migration (rename step): {e}. 'reading_locations' migration aborted.", exc_info=True)
+        
+        if renamed_successfully:
+            try:
+                # 2. Create new table with correct schema
+                cursor.execute('''
+                    CREATE TABLE reading_locations (
+                        article_id INTEGER PRIMARY KEY,
+                        book_id INTEGER NOT NULL,
+                        paragraph_index INTEGER NOT NULL,
+                        sentence_index_in_paragraph INTEGER NOT NULL,
+                        last_updated DATETIME DEFAULT CURRENT_TIMESTAMP,
+                        FOREIGN KEY (article_id) REFERENCES articles (id) ON DELETE CASCADE,
+                        FOREIGN KEY (book_id) REFERENCES books (id) ON DELETE CASCADE
+                    )
+                ''')
+                if app: app.logger.info("DB: Created new 'reading_locations' table with 'book_id' and FKs.")
+
+                # 3. Copy data, fetching book_id from articles table
+                migration_successful = False
+                rows_migrated = 0
+                cursor.execute(f'''
+                    INSERT INTO reading_locations (article_id, book_id, paragraph_index, sentence_index_in_paragraph, last_updated)
+                    SELECT
+                        r_old.article_id,
+                        a.book_id,
+                        r_old.paragraph_index,
+                        r_old.sentence_index_in_paragraph,
+                        r_old.last_updated
+                    FROM {temp_table_name} r_old
+                    JOIN articles a ON r_old.article_id = a.id
+                    WHERE a.book_id IS NOT NULL
+                ''')
+                rows_migrated = cursor.rowcount
+                if app: app.logger.info(f"DB: Copied {rows_migrated} rows to new 'reading_locations' table.")
+                migration_successful = True
+            except sqlite3.Error as e:
+                if app: app.logger.error(f"DB: SQLite error migrating data to 'reading_locations' from '{temp_table_name}': {e}. Data might be lost if old table is dropped.", exc_info=True)
+            
+            # 4. Drop old table
+            if migration_successful:
+                cursor.execute(f"DROP TABLE {temp_table_name}")
+                if app: app.logger.info(f"DB: Dropped temporary table '{temp_table_name}'.")
+            else:
+                if app: app.logger.warning(f"DB: Migration of 'reading_locations' data failed or {rows_migrated} rows were copied. '{temp_table_name}' was NOT dropped automatically. Manual cleanup may be required.")
+        else: # Renaming failed
+             if app: app.logger.warning(f"DB: 'reading_locations' table could not be migrated as renaming step failed.")
+    else: # Table exists and 'book_id' column is present
+        if app: app.logger.info("DB: 'reading_locations' table exists and 'book_id' column is present.")
+
+
     conn.commit()
     conn.close()
     if app:
@@ -114,7 +191,6 @@ def init_db(app=None):
 
 # --- Book Functions ---
 def add_book(title, app_logger=None):
-    """Adds a new book and returns its ID. If title exists, returns existing ID."""
     conn = get_db_connection()
     cursor = conn.cursor()
     try:
@@ -123,7 +199,7 @@ def add_book(title, app_logger=None):
         conn.commit()
         if app_logger: app_logger.info(f"DB: Added new book '{title}' with ID {book_id}.")
         return book_id
-    except sqlite3.IntegrityError: # Title already exists
+    except sqlite3.IntegrityError: 
         cursor.execute("SELECT id FROM books WHERE title = ?", (title,))
         book_id = cursor.fetchone()['id']
         if app_logger: app_logger.info(f"DB: Book '{title}' already exists with ID {book_id}. Returning existing ID.")
@@ -132,7 +208,6 @@ def add_book(title, app_logger=None):
         conn.close()
 
 def get_book_by_id(book_id):
-    """Retrieves a single book by its ID."""
     conn = get_db_connection()
     cursor = conn.cursor()
     cursor.execute("SELECT id, title, creation_timestamp FROM books WHERE id = ?", (book_id,))
@@ -141,7 +216,6 @@ def get_book_by_id(book_id):
     return book
 
 def get_all_books():
-    """Retrieves all books from the database, ordered by title."""
     conn = get_db_connection()
     cursor = conn.cursor()
     cursor.execute("SELECT id, title, creation_timestamp FROM books ORDER BY title ASC")
@@ -151,9 +225,6 @@ def get_all_books():
 
 # --- Article Functions (modified) ---
 def add_article(book_id, filename, app_logger=None):
-    """Adds a new article (filename) for a given book_id and returns its article ID.
-    Clears old sentences and SRT/MP3 paths if the article filename already exists (globally).
-    """
     conn = get_db_connection()
     cursor = conn.cursor()
     try:
@@ -168,10 +239,11 @@ def add_article(book_id, filename, app_logger=None):
                 if app_logger: app_logger.warning(f"DB: Re-assigning article '{filename}' (ID: {article_id}) from book ID {existing_article['book_id']} to book ID {book_id}.")
                 cursor.execute("UPDATE articles SET book_id = ?, upload_timestamp = CURRENT_TIMESTAMP WHERE id = ?", (book_id, article_id))
             else:
-                cursor.execute("UPDATE articles SET upload_timestamp = CURRENT_TIMESTAMP WHERE id = ?", (article_id,)) # Just update timestamp if same book
+                cursor.execute("UPDATE articles SET upload_timestamp = CURRENT_TIMESTAMP WHERE id = ?", (article_id,))
 
             cursor.execute("DELETE FROM sentences WHERE article_id = ?", (article_id,))
             cursor.execute("UPDATE articles SET processed_srt_path = NULL, converted_mp3_path = NULL WHERE id = ?", (article_id,))
+            cursor.execute("DELETE FROM reading_locations WHERE article_id = ?", (article_id,))
             conn.commit()
         else:
             cursor.execute("INSERT INTO articles (book_id, filename) VALUES (?, ?)", (book_id, filename))
@@ -191,7 +263,6 @@ def add_article(book_id, filename, app_logger=None):
         conn.close()
 
 def get_articles_for_book(book_id):
-    """Retrieves all articles for a given book_id, ordered by filename."""
     conn = get_db_connection()
     cursor = conn.cursor()
     cursor.execute("""
@@ -205,7 +276,6 @@ def get_articles_for_book(book_id):
     return articles
 
 def get_article_by_id(article_id):
-    """Retrieves a single article by its ID, including all relevant paths and book_id."""
     conn = get_db_connection()
     cursor = conn.cursor()
     cursor.execute("""
@@ -217,11 +287,7 @@ def get_article_by_id(article_id):
     conn.close()
     return article
 
-# get_all_articles() - This is no longer the primary way to list articles for users.
-# It can be removed or kept for potential admin features. For now, let's remove it to avoid confusion.
-# def get_all_articles(): ...
-
-def get_article_filename(article_id): # Kept as it might be used internally or by other features
+def get_article_filename(article_id):
     conn = get_db_connection()
     cursor = conn.cursor()
     cursor.execute("SELECT filename FROM articles WHERE id = ?", (article_id,))
@@ -358,12 +424,88 @@ def update_article_converted_mp3_path(article_id, mp3_path, app_logger=None):
     finally:
         conn.close()
 
+# --- Reading Location Functions ---
+def set_reading_location(article_id, book_id, paragraph_index, sentence_index_in_paragraph, app_logger=None):
+    """Sets or updates the reading location for a given article, including its book_id."""
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    try:
+        cursor.execute("""
+            INSERT INTO reading_locations (article_id, book_id, paragraph_index, sentence_index_in_paragraph, last_updated)
+            VALUES (?, ?, ?, ?, CURRENT_TIMESTAMP)
+            ON CONFLICT(article_id) DO UPDATE SET
+                book_id = excluded.book_id,
+                paragraph_index = excluded.paragraph_index,
+                sentence_index_in_paragraph = excluded.sentence_index_in_paragraph,
+                last_updated = CURRENT_TIMESTAMP
+        """, (article_id, book_id, paragraph_index, sentence_index_in_paragraph))
+        conn.commit()
+        if app_logger:
+            app_logger.info(f"DB: Set reading location for article {article_id} (book {book_id}) to P:{paragraph_index}, S:{sentence_index_in_paragraph}.")
+    except sqlite3.Error as e:
+        if app_logger:
+            app_logger.error(f"DB: Error setting reading location for article {article_id} (book {book_id}): {e}", exc_info=True)
+        conn.rollback()
+        raise
+    finally:
+        conn.close()
+
+def get_reading_location(article_id, app_logger=None):
+    """Retrieves the reading location for a given article."""
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    try:
+        cursor.execute("""
+            SELECT article_id, book_id, paragraph_index, sentence_index_in_paragraph, last_updated
+            FROM reading_locations
+            WHERE article_id = ?
+        """, (article_id,))
+        location = cursor.fetchone()
+        if app_logger and location:
+            app_logger.debug(f"DB: Retrieved reading location for article {article_id}: P:{location['paragraph_index']}, S:{location['sentence_index_in_paragraph']} (Book: {location['book_id']}).")
+        elif app_logger:
+             app_logger.debug(f"DB: No reading location found for article {article_id}.")
+        return location 
+    except sqlite3.Error as e:
+        if app_logger:
+            app_logger.error(f"DB: Error getting reading location for article {article_id}: {e}", exc_info=True)
+        raise
+    finally:
+        conn.close()
+
+def get_most_recent_reading_location_for_book(book_id, app_logger=None):
+    """Retrieves the most recent reading location (article_id, p_idx, s_idx) for a given book."""
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    try:
+        cursor.execute("""
+            SELECT article_id, paragraph_index, sentence_index_in_paragraph, last_updated
+            FROM reading_locations
+            WHERE book_id = ?
+            ORDER BY last_updated DESC
+            LIMIT 1
+        """, (book_id,))
+        location = cursor.fetchone()
+        if app_logger and location:
+            app_logger.debug(f"DB: Most recent reading for book {book_id} is article {location['article_id']} "
+                             f"at P:{location['paragraph_index']}, S:{location['sentence_index_in_paragraph']}.")
+        elif app_logger and not location:
+            app_logger.debug(f"DB: No reading location found for book {book_id}.")
+        return location # Returns a Row object or None
+    except sqlite3.Error as e:
+        if app_logger:
+            app_logger.error(f"DB: Error getting most recent reading location for book {book_id}: {e}", exc_info=True)
+        raise
+    finally:
+        conn.close()
+
+
 if __name__ == '__main__':
     print(f"Initializing database at: {DATABASE_PATH}")
     class DummyApp:
         def __init__(self):
             self.logger = logging.getLogger('db_manager_standalone')
-            self.logger.setLevel(logging.INFO)
+            self.logger.setLevel(logging.DEBUG) # Changed to DEBUG for more verbose init
             handler = logging.StreamHandler()
             formatter = logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s')
             handler.setFormatter(formatter)

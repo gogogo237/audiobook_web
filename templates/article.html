@@ -1,3 +1,4 @@
+======= templates/article.html =======
 <!-- bilingual_app/templates/article.html -->
 {% extends "base.html" %}
 
@@ -82,8 +83,13 @@
         color: #007bff; 
     }
     .contextual-menu-item .menu-icon { 
-        margin-right: 0px; 
+        margin-right: 0px; /* Adjusted to 0px, text used for menu item name */
         line-height: 1; 
+    }
+     .contextual-menu-item .menu-text {
+        margin-left: 8px; /* Space between icon and text */
+        font-size: 0.7em; /* Smaller text for menu item name */
+        vertical-align: middle;
     }
     
     #translation-popup {
@@ -104,7 +110,7 @@
     /* Go Back Button Style */
     #goBackButton {
         position: fixed;
-        bottom: 20px; /* Position above where footer actions might have been */
+        bottom: 20px; 
         right: 20px;
         background-color: #007bff;
         color: white;
@@ -112,24 +118,72 @@
         border-radius: 50%;
         width: 50px;
         height: 50px;
-        font-size: 1.5em; /* Icon size */
+        font-size: 1.5em; 
         cursor: pointer;
         box-shadow: 0 2px 10px rgba(0,0,0,0.2);
-        display: none; /* Initially hidden */
+        display: none; 
         justify-content: center;
         align-items: center;
-        z-index: 1002; /* Above contextual menu */
+        z-index: 1002; 
         transition: opacity 0.2s ease-in-out, transform 0.2s ease-in-out;
         opacity: 0;
         transform: scale(0.8);
     }
     #goBackButton.visible {
-        display: flex; /* Use flex to center icon */
+        display: flex; 
         opacity: 1;
         transform: scale(1);
     }
     #goBackButton:hover {
         background-color: #0056b3;
+    }
+    
+    /* Go To Top Button Style */
+    #goToTopButton {
+        position: fixed;
+        bottom: 80px; /* Position above the goBackButton */
+        right: 20px;
+        background-color: #17a2b8; /* Different color for distinction */
+        color: white;
+        border: none;
+        border-radius: 50%;
+        width: 50px;
+        height: 50px;
+        font-size: 1.5em;
+        cursor: pointer;
+        box-shadow: 0 2px 10px rgba(0,0,0,0.2);
+        display: none;
+        justify-content: center;
+        align-items: center;
+        z-index: 1002;
+        transition: opacity 0.2s ease-in-out, transform 0.2s ease-in-out;
+        opacity: 0;
+        transform: scale(0.8);
+    }
+    #goToTopButton.visible {
+        display: flex;
+        opacity: 1;
+        transform: scale(1);
+    }
+    #goToTopButton:hover {
+        background-color: #117a8b;
+    }
+
+
+    /* Restore Location Button Style */
+    #restoreLocationButton {
+        display: none; /* Hidden by default, shown by JS if location exists */
+        margin-left: 15px;
+        padding: 5px 10px;
+        font-size: 0.9em;
+        background-color: #6c757d;
+        color: white;
+        border: none;
+        border-radius: 4px;
+        cursor: pointer;
+    }
+    #restoreLocationButton:hover {
+        background-color: #5a6268;
     }
 
 </style>
@@ -143,16 +197,19 @@
     <p><a href="{{ url_for('list_books_page') }}">« Back to Books List (Book info missing for this article)</a></p>
     {% endif %}
 
-    <h1>{{ article.filename }}</h1>
-
+    <h1>{{ article.filename }}
+        <button id="restoreLocationButton" title="Restore Last Reading Position">🔖</button>
+    </h1>
+    
+    <button id="goToTopButton" title="Go to Top">⬆️</button> 
     <button id="goBackButton" title="Go Back to Highlighted Sentence">⬇️</button> 
     
     <div id="python-debug-info" style="display:none;">
         Python `has_timestamps`: {{ has_timestamps|tojson }}
         Python `article.converted_mp3_path`: {{ article.converted_mp3_path|tojson }}
+        Python `reading_location`: {{ reading_location|tojson }}
     </div>
 
-    <!-- ... (rest of the content: audiobook-controls, download button, article-content-wrapper, translation-popup, contextual-menu) ... -->
     {% if has_timestamps %}
     <div class="audiobook-controls">
         <button id="toggleAudiobookMode">Enable Audiobook Mode</button>
@@ -184,6 +241,8 @@
                         {%- for sentence_pair in paragraph_sentences -%}
                             <span class="english-sentence" 
                                   data-translation="{{ sentence_pair.chinese }}"
+                                  data-paragraph-index="{{ sentence_pair.paragraph_index }}"
+                                  data-sentence-index="{{ sentence_pair.sentence_index_in_paragraph }}"
                                   {% if sentence_pair.start_time_ms is not none %} data-start-time-ms="{{ sentence_pair.start_time_ms }}"{% endif %}
                                   {% if sentence_pair.end_time_ms is not none %} data-end-time-ms="{{ sentence_pair.end_time_ms }}"{% endif %}>
                                 {{- sentence_pair.english -}}
@@ -200,7 +259,7 @@
     <div id="translation-popup"></div>
 
     <div id="contextual-menu">
-        <!-- Menu items will be populated by JavaScript or predefined here -->
+        <!-- Menu items will be populated by JavaScript -->
     </div>
 {% endblock %}
 
@@ -208,23 +267,28 @@
 {% block scripts %}
 <script>
 document.addEventListener('DOMContentLoaded', function() {
-    // ... (previous JS variable initializations: pythonHasTimestamps, pythonConvertedMp3Path, etc.) ...
     let pythonHasTimestamps = false;
     let pythonConvertedMp3Path = null;
+    let initialReadingLocation = null; // Will hold {paragraph_index: X, sentence_index_in_paragraph: Y} or null
+    const articleId = {{ article.id }};
+
     try {
         const debugInfoElement = document.getElementById('python-debug-info');
         if (debugInfoElement) {
             const textContent = debugInfoElement.textContent;
-            const parts = textContent.split('Python ');
-            parts.forEach(part => {
-                if (part.startsWith('`has_timestamps`:')) {
-                    const jsonPart = part.substring(part.indexOf(':') + 1).trim().split(' Python')[0].trim();
-                    pythonHasTimestamps = JSON.parse(jsonPart);
-                } else if (part.startsWith('`article.converted_mp3_path`:')) {
-                    const jsonPart = part.substring(part.indexOf(':') + 1).trim().split(' Python')[0].trim();
-                    pythonConvertedMp3Path = JSON.parse(jsonPart);
-                }
-            });
+            // More robust parsing for multiple JSON objects
+            const hasTimestampsMatch = textContent.match(/`has_timestamps`:\s*([^\n`]+)/);
+            if (hasTimestampsMatch && hasTimestampsMatch[1]) {
+                pythonHasTimestamps = JSON.parse(hasTimestampsMatch[1].trim());
+            }
+            const mp3PathMatch = textContent.match(/`article.converted_mp3_path`:\s*([^\n`]+)/);
+            if (mp3PathMatch && mp3PathMatch[1]) {
+                pythonConvertedMp3Path = JSON.parse(mp3PathMatch[1].trim());
+            }
+            const readingLocationMatch = textContent.match(/`reading_location`:\s*([^\n`]+)/);
+            if (readingLocationMatch && readingLocationMatch[1]) {
+                initialReadingLocation = JSON.parse(readingLocationMatch[1].trim());
+            }
         }
     } catch (e) {
         console.error("JS: Error parsing python-debug-info:", e);
@@ -232,11 +296,13 @@ document.addEventListener('DOMContentLoaded', function() {
     
     const articleContentWrapper = document.getElementById('article-content-wrapper');
     const popup = document.getElementById('translation-popup');
-    let highlightedSentence = null; // This will store the DOM element
-    let lastHighlightedSentenceElement = null; // To remember for the "Go Back" button
+    let highlightedSentence = null; 
+    let lastHighlightedSentenceElement = null; 
     let currentPopupTargetSentence = null;
     const contextualMenu = document.getElementById('contextual-menu');
     const goBackButton = document.getElementById('goBackButton');
+    const goToTopButton = document.getElementById('goToTopButton'); // New button
+    const restoreLocationButton = document.getElementById('restoreLocationButton');
 
     let audioContext = null;
     let audioBuffer = null;
@@ -250,11 +316,76 @@ document.addEventListener('DOMContentLoaded', function() {
     const audioFileNameSpan = document.getElementById('audioFileName');
     const audiobookHint = document.getElementById('audiobookHint');
 
+    // --- Reading Location Logic ---
+    let validClickCounter = 0;
+    const CLICK_THRESHOLD_AUTOSAVE = 5;
+
+    function findSentenceElement(pIndex, sIndex) {
+        return document.querySelector(`.english-sentence[data-paragraph-index="${pIndex}"][data-sentence-index="${sIndex}"]`);
+    }
+
+    async function saveCurrentLocation(pIndex, sIndex, source = "unknown") {
+        if (pIndex === undefined || sIndex === undefined) {
+            console.warn("JS: saveCurrentLocation called with undefined indices.");
+            return;
+        }
+        console.log(`JS: Saving location P:${pIndex}, S:${sIndex} for article ${articleId} (source: ${source})`);
+        try {
+            const response = await fetch(`/article/${articleId}/save_location`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ paragraph_index: pIndex, sentence_index_in_paragraph: sIndex })
+            });
+            const result = await response.json();
+            if (response.ok && result.status === 'success') {
+                console.log(`JS: Location P:${pIndex}, S:${sIndex} saved successfully (${source}).`);
+            } else {
+                console.error("JS: Failed to save location:", result.message);
+            }
+        } catch (error) {
+            console.error("JS: Error sending save location request:", error);
+        }
+    }
+
+    function checkAutoSave() {
+        if (validClickCounter >= CLICK_THRESHOLD_AUTOSAVE && highlightedSentence) {
+            const pIndex = highlightedSentence.dataset.paragraphIndex;
+            const sIndex = highlightedSentence.dataset.sentenceIndex;
+            if (pIndex !== undefined && sIndex !== undefined) {
+                saveCurrentLocation(parseInt(pIndex), parseInt(sIndex), "auto");
+                validClickCounter = 0; // Reset counter
+            }
+        }
+    }
+    
+    if (restoreLocationButton) {
+        if (initialReadingLocation && initialReadingLocation.paragraph_index !== undefined && initialReadingLocation.sentence_index_in_paragraph !== undefined) {
+            restoreLocationButton.style.display = 'inline-block';
+            restoreLocationButton.addEventListener('click', function() {
+                const targetSentence = findSentenceElement(initialReadingLocation.paragraph_index, initialReadingLocation.sentence_index_in_paragraph);
+                if (targetSentence) {
+                    if (highlightedSentence) highlightedSentence.classList.remove('highlighted-sentence');
+                    
+                    targetSentence.scrollIntoView({ behavior: 'smooth', block: 'center' });
+                    targetSentence.classList.add('highlighted-sentence');
+                    highlightedSentence = targetSentence;
+                    lastHighlightedSentenceElement = targetSentence;
+                    updateGoBackButtonVisibility();
+                    console.log("JS: Restored reading location to P:", initialReadingLocation.paragraph_index, "S:", initialReadingLocation.sentence_index_in_paragraph);
+                } else {
+                    console.warn("JS: Could not find sentence for stored reading location.");
+                }
+            });
+        } else {
+            restoreLocationButton.style.display = 'none';
+        }
+    }
+
+
     // --- Go Back Button Logic ---
     function updateGoBackButtonVisibility() {
-        if (lastHighlightedSentenceElement && (window.scrollY > 100 || document.documentElement.scrollTop > 100)) { // Show if scrolled and sentence was highlighted
+        if (lastHighlightedSentenceElement && (window.scrollY > 100 || document.documentElement.scrollTop > 100)) { 
             const sentenceRect = lastHighlightedSentenceElement.getBoundingClientRect();
-            // Show if sentence is not fully visible or scrolled significantly past it
             if (sentenceRect.bottom < 0 || sentenceRect.top > window.innerHeight || Math.abs(window.scrollY - lastHighlightedSentenceElement.offsetTop) > window.innerHeight / 2) {
                  goBackButton.classList.add('visible');
             } else {
@@ -269,18 +400,39 @@ document.addEventListener('DOMContentLoaded', function() {
         goBackButton.addEventListener('click', function() {
             if (lastHighlightedSentenceElement) {
                 lastHighlightedSentenceElement.scrollIntoView({ behavior: 'smooth', block: 'center' });
-                // Highlight it again briefly or ensure it's styled as active
                 if (highlightedSentence) highlightedSentence.classList.remove('highlighted-sentence');
                 lastHighlightedSentenceElement.classList.add('highlighted-sentence');
                 highlightedSentence = lastHighlightedSentenceElement;
-
-                // Optionally hide the go back button after use or let scroll listener handle it
-                setTimeout(() => updateGoBackButtonVisibility(), 500); // Re-check after scroll
+                setTimeout(() => updateGoBackButtonVisibility(), 500); 
             }
         });
         window.addEventListener('scroll', updateGoBackButtonVisibility);
         window.addEventListener('resize', updateGoBackButtonVisibility);
     }
+
+    // --- Go To Top Button Logic ---
+    let lastScrollTop = 0;
+    const scrollThreshold = 150; // Min scroll distance to show button
+
+    function updateGoToTopButtonVisibility() {
+        let st = window.pageYOffset || document.documentElement.scrollTop;
+        if (st < lastScrollTop && st > scrollThreshold) { // Scrolling Up and not at top
+            goToTopButton.classList.add('visible');
+        } else { // Scrolling Down or at/near top
+            goToTopButton.classList.remove('visible');
+        }
+        lastScrollTop = st <= 0 ? 0 : st; // For Mobile or negative scrolling
+    }
+
+    if (goToTopButton) {
+        goToTopButton.addEventListener('click', function() {
+            window.scrollTo({ top: 0, behavior: 'smooth' });
+        });
+        window.addEventListener('scroll', updateGoToTopButtonVisibility);
+        window.addEventListener('resize', updateGoToTopButtonVisibility);
+        updateGoToTopButtonVisibility(); // Initial check
+    }
+
 
     // --- Contextual Menu & Popups ---
     function displayPopup(targetElement, content) { 
@@ -316,7 +468,7 @@ document.addEventListener('DOMContentLoaded', function() {
     function hideContextualMenu() {
         if (contextualMenu) {
             contextualMenu.style.opacity = '0'; 
-            contextualMenu.style.transform = 'scale(0.95)'; // Shrink slightly on hide
+            contextualMenu.style.transform = 'scale(0.95)'; 
             setTimeout(() => { 
                 contextualMenu.style.display = 'none';
             }, 100); 
@@ -333,8 +485,9 @@ document.addEventListener('DOMContentLoaded', function() {
     function populateAndShowContextualMenu(sentenceElement, clickX) {
         if (!contextualMenu || !sentenceElement) return;
 
-        let menuHTML = `<div class="contextual-menu-item" data-action="show-translation" title="Show Chinese Translation"><span class="menu-icon">💬</span></div>`;
-        menuHTML += `<div class="contextual-menu-item" data-action="go-to-top" title="Go to Top"><span class="menu-icon">⬆️</span></div>`;
+        let menuHTML = `<div class="contextual-menu-item" data-action="show-translation" title="Show Chinese Translation"><span class="menu-icon">💬</span><span class="menu-text">Translate</span></div>`;
+        menuHTML += `<div class="contextual-menu-item" data-action="save-location" title="Save this reading location"><span class="menu-icon">💾</span><span class="menu-text">Save Spot</span></div>`;
+        // "Go to Top" removed from here
 
         if (isAudiobookMode && audioContext && audioBuffer && pythonHasTimestamps) {
             let audioIcon = "▶️"; 
@@ -343,13 +496,13 @@ document.addEventListener('DOMContentLoaded', function() {
                 audioIcon = "⏹️"; 
                 audioTitle = "Stop Sentence Audio";
             }
-            menuHTML += `<div class="contextual-menu-item" data-action="play-pause-audio" title="${audioTitle}"><span class="menu-icon">${audioIcon}</span></div>`;
+            menuHTML += `<div class="contextual-menu-item" data-action="play-pause-audio" title="${audioTitle}"><span class="menu-icon">${audioIcon}</span><span class="menu-text">Audio</span></div>`;
         }
 
         contextualMenu.innerHTML = menuHTML;
         contextualMenu.style.display = 'block'; 
         contextualMenu.style.opacity = '0'; 
-        contextualMenu.style.transform = 'scale(0.95)'; // Initial state for pop animation
+        contextualMenu.style.transform = 'scale(0.95)'; 
 
         const rect = sentenceElement.getBoundingClientRect();
         const menuWidth = contextualMenu.offsetWidth;
@@ -358,17 +511,15 @@ document.addEventListener('DOMContentLoaded', function() {
         let menuTop = rect.bottom + window.scrollY + 5; 
         let menuLeft;
 
-        // Decide left/right based on clickX relative to viewport center
         const viewportCenterX = window.innerWidth / 2;
-        if (clickX < viewportCenterX) { // Click on left half, menu on right of sentence
+        if (clickX < viewportCenterX) { 
             menuLeft = rect.left + window.scrollX;
             contextualMenu.style.transformOrigin = 'top left';
-        } else { // Click on right half, menu on left of sentence
+        } else { 
             menuLeft = rect.right + window.scrollX - menuWidth;
             contextualMenu.style.transformOrigin = 'top right';
         }
         
-        // Boundary adjustments
         if (menuLeft < window.scrollX + 10) menuLeft = window.scrollX + 10;
         if (menuLeft + menuWidth > window.innerWidth + window.scrollX - 10) {
             menuLeft = window.innerWidth + window.scrollX - menuWidth - 10;
@@ -382,7 +533,7 @@ document.addEventListener('DOMContentLoaded', function() {
         contextualMenu.style.left = menuLeft + 'px';
         setTimeout(() => { 
              contextualMenu.style.opacity = '1';
-             contextualMenu.style.transform = 'scale(1)'; // Pop to full size
+             contextualMenu.style.transform = 'scale(1)'; 
         }, 10);
     }
 
@@ -399,12 +550,18 @@ document.addEventListener('DOMContentLoaded', function() {
                 } else {
                     displayPopup(targetSentence, "No translation available for this sentence.");
                 }
-                if (!isAudiobookMode) {
-                    if (highlightedSentence) highlightedSentence.classList.remove('highlighted-sentence');
-                    targetSentence.classList.add('highlighted-sentence');
-                    highlightedSentence = targetSentence;
-                    lastHighlightedSentenceElement = targetSentence; // Remember for go back
-                    updateGoBackButtonVisibility();
+                if (!isAudiobookMode) { 
+                    if (highlightedSentence && highlightedSentence !== targetSentence) {
+                         highlightedSentence.classList.remove('highlighted-sentence');
+                         validClickCounter++;
+                         checkAutoSave();
+                    }
+                    if (highlightedSentence !== targetSentence) {
+                        targetSentence.classList.add('highlighted-sentence');
+                        highlightedSentence = targetSentence;
+                        lastHighlightedSentenceElement = targetSentence; 
+                        updateGoBackButtonVisibility();
+                    }
                 }
             } else {
                 hideTranslationPopup();
@@ -424,19 +581,21 @@ document.addEventListener('DOMContentLoaded', function() {
                     } else {
                         populateAndShowContextualMenu(targetSentence, event.clientX);
                     }
-                } else {
+                } else { // New sentence clicked
                     if (highlightedSentence) {
                         highlightedSentence.classList.remove('highlighted-sentence');
                     }
                     highlightedSentence = targetSentence;
-                    lastHighlightedSentenceElement = targetSentence; // Remember for go back
+                    lastHighlightedSentenceElement = targetSentence; 
                     highlightedSentence.classList.add('highlighted-sentence');
                     hideContextualMenu(); 
                     updateGoBackButtonVisibility();
-
+                    
+                    validClickCounter++; 
+                    checkAutoSave();
 
                     if (isAudiobookMode && audioContext && audioBuffer) {
-                        playSentenceAudio(targetSentence);
+                        playSentenceAudio(targetSentence); 
                     } else if (isAudiobookMode && (!audioContext || !audioBuffer)) {
                         console.log("JS: Audiobook mode active, but audio not loaded/ready.");
                     }
@@ -448,14 +607,13 @@ document.addEventListener('DOMContentLoaded', function() {
                 if (!popup.contains(event.target)) { 
                     hideTranslationPopup();
                 }
-                // Deselect sentence if clicked outside of sentence, menu, or popup
                 if (highlightedSentence && 
                     !contextualMenu.contains(event.target) && 
                     !popup.contains(event.target) &&
-                    !goBackButton.contains(event.target) ) { // And not go back button
+                    !goBackButton.contains(event.target) &&
+                    !goToTopButton.contains(event.target) ) { // Also check goToTopButton
                     highlightedSentence.classList.remove('highlighted-sentence');
                     highlightedSentence = null;
-                    // Don't clear lastHighlightedSentenceElement here, so "Go Back" still works
                     updateGoBackButtonVisibility(); 
                 }
             }
@@ -473,12 +631,7 @@ document.addEventListener('DOMContentLoaded', function() {
 
             const action = actionTarget.dataset.action;
             switch (action) {
-                case 'go-to-top':
-                    window.scrollTo({ top: 0, behavior: 'smooth' });
-                    // After scrolling to top, make sure the "Go Back" button is visible
-                    // if lastHighlightedSentenceElement exists.
-                    setTimeout(updateGoBackButtonVisibility, 100); // Allow scroll to potentially finish
-                    break;
+                // Case 'go-to-top' removed
                 case 'show-translation':
                     const translation = highlightedSentence.dataset.translation;
                     if (translation) {
@@ -486,6 +639,15 @@ document.addEventListener('DOMContentLoaded', function() {
                         currentPopupTargetSentence = highlightedSentence;
                     } else {
                         displayPopup(highlightedSentence, 'No translation available.');
+                    }
+                    break;
+                case 'save-location':
+                    const pIndex = highlightedSentence.dataset.paragraphIndex;
+                    const sIndex = highlightedSentence.dataset.sentenceIndex;
+                    if (pIndex !== undefined && sIndex !== undefined) {
+                         saveCurrentLocation(parseInt(pIndex), parseInt(sIndex), "manual_menu");
+                    } else {
+                        console.warn("JS: Could not save location, indices missing from highlighted sentence.");
                     }
                     break;
                 case 'play-pause-audio':
@@ -500,9 +662,11 @@ document.addEventListener('DOMContentLoaded', function() {
                             if (iconSpan) iconSpan.textContent = "▶️";
                             actionTarget.title = "Play Sentence Audio";
                         } else {
-                            playSentenceAudio(highlightedSentence);
+                            playSentenceAudio(highlightedSentence); 
                             if (iconSpan) iconSpan.textContent = "⏹️";
                             actionTarget.title = "Stop Sentence Audio";
+                            validClickCounter++; 
+                            checkAutoSave();
                         }
                     }
                     break;
@@ -530,12 +694,12 @@ document.addEventListener('DOMContentLoaded', function() {
             !(contextualMenu.style.display === 'block' && contextualMenu.contains(event.target))) { 
             hideTranslationPopup();
         }
-        updateGoBackButtonVisibility(); // Check on any click
+        updateGoBackButtonVisibility(); 
+        // updateGoToTopButtonVisibility(); // Not strictly needed here, scroll handles it
     });
     
-    // --- Audiobook Mode Logic (largely unchanged, ensure it calls updateGoBackButtonVisibility if needed) ---
+    // --- Audiobook Mode Logic ---
     if (toggleAudiobookModeButton) {
-        // ... initAudioContext, maxSentenceEndTime calculation ... (as before)
         function initAudioContext() {
             if (!audioContext) {
                 try {
@@ -560,10 +724,6 @@ document.addEventListener('DOMContentLoaded', function() {
                 toggleAudiobookModeButton.textContent = 'Disable Audiobook Mode';
                 localAudioFileInput.style.display = 'inline-block';
                 audiobookHint.style.display = 'block';
-                if (highlightedSentence) {
-                    highlightedSentence.classList.remove('highlighted-sentence');
-                    highlightedSentence = null; // Don't affect lastHighlightedSentenceElement
-                }
             } else { 
                 toggleAudiobookModeButton.textContent = 'Enable Audiobook Mode';
                 localAudioFileInput.style.display = 'none';
@@ -575,9 +735,9 @@ document.addEventListener('DOMContentLoaded', function() {
             hideContextualMenu(); 
             hideTranslationPopup();
             updateGoBackButtonVisibility();
+            updateGoToTopButtonVisibility();
         });
 
-        // ... localAudioFileInput change listener ... (as before)
         localAudioFileInput.addEventListener('change', async function(event) {
             if (!audioContext && !initAudioContext()) return;
             const file = event.target.files[0];
@@ -592,7 +752,7 @@ document.addEventListener('DOMContentLoaded', function() {
                     audioBuffer = await audioContext.decodeAudioData(arrayBuffer);
                     audioFileNameSpan.textContent = file.name;
                      if (maxSentenceEndTime > 0 && (audioBuffer.duration * 1000 < maxSentenceEndTime)) {
-                        alert(`Warning: Audio duration shorter than max sentence time.`);
+                        alert(`Warning: Audio duration (${(audioBuffer.duration).toFixed(2)}s) may be shorter than max sentence time (${(maxSentenceEndTime/1000).toFixed(2)}s).`);
                     }
                 } catch (e) {
                     alert(`Error decoding audio: ${e.message}`);
@@ -602,7 +762,6 @@ document.addEventListener('DOMContentLoaded', function() {
             }
         });
 
-        // ... playSentenceAudio, proceedWithPlayback ... (as before, but update menu if audio ends)
         function playSentenceAudio(sentenceElement) {
             if (!audioContext || audioContext.state === 'closed') { alert("Audio system error."); return; }
             if (audioContext.state === 'suspended') {
@@ -614,24 +773,43 @@ document.addEventListener('DOMContentLoaded', function() {
         }
         
         function proceedWithPlayback(sentenceElement) {
-            if (!audioBuffer) { alert("Please load an audio file."); return; }
-            if (currentSourceNode) { try { currentSourceNode.onended = null; currentSourceNode.stop(); } catch (e) {} }
+            if (!audioBuffer) { alert("Please load an audio file first."); return; }
+            
+            if (currentSourceNode) { 
+                try { currentSourceNode.onended = null; currentSourceNode.stop(); currentSourceNode.disconnect(); } catch (e) {} 
+                currentSourceNode = null;
+            }
             if (currentPlayingSentence && currentPlayingSentence !== sentenceElement) {
                 currentPlayingSentence.classList.remove('playing-sentence');
             }
 
             const startTimeMs = parseInt(sentenceElement.dataset.startTimeMs, 10);
             const endTimeMs = parseInt(sentenceElement.dataset.endTimeMs, 10);
-            if (isNaN(startTimeMs) || isNaN(endTimeMs)) { alert("Sentence missing time data."); return; }
+            if (isNaN(startTimeMs) || isNaN(endTimeMs)) { 
+                alert("Sentence missing time data. Cannot play audio."); 
+                return; 
+            }
 
             const offsetInSeconds = startTimeMs / 1000.0;
             let durationInSeconds = (endTimeMs - startTimeMs) / 1000.0;
-            if (offsetInSeconds < 0 || offsetInSeconds >= audioBuffer.duration) { alert("Sentence start time out of audio bounds."); return; }
+            if (offsetInSeconds < 0 || offsetInSeconds >= audioBuffer.duration) { 
+                alert("Sentence start time is out of audio bounds."); 
+                return; 
+            }
             if (durationInSeconds <= 0) durationInSeconds = 0.05; 
             const clampedDuration = Math.min(durationInSeconds, audioBuffer.duration - offsetInSeconds);
 
             currentPlayingSentence = sentenceElement;
             currentPlayingSentence.classList.add('playing-sentence');
+            if (highlightedSentence && highlightedSentence !== currentPlayingSentence) {
+                highlightedSentence.classList.remove('highlighted-sentence');
+            }
+            highlightedSentence = currentPlayingSentence; 
+            lastHighlightedSentenceElement = highlightedSentence;
+            updateGoBackButtonVisibility();
+            updateGoToTopButtonVisibility();
+
+
             currentSourceNode = audioContext.createBufferSource();
             currentSourceNode.buffer = audioBuffer;
             currentSourceNode.connect(audioContext.destination);
@@ -641,18 +819,21 @@ document.addEventListener('DOMContentLoaded', function() {
             } catch (e) {
                 alert(`Could not start playback: ${e.message}`);
                 if (currentPlayingSentence) currentPlayingSentence.classList.remove('playing-sentence');
-                currentPlayingSentence = null; return;
+                currentPlayingSentence = null; 
+                currentSourceNode = null;
+                return;
             }
             
             currentSourceNode.onended = () => {
+                if (currentSourceNode && !currentSourceNode.context) { 
+                    // No specific action needed for currentPlayingSentence highlight here
+                }
                 if (contextualMenu.style.display === 'block' && highlightedSentence === sentenceElement) {
                     const audioButtonIcon = contextualMenu.querySelector('.contextual-menu-item[data-action="play-pause-audio"] .menu-icon');
                     if (audioButtonIcon) audioButtonIcon.textContent = "▶️";
                     const audioButton = contextualMenu.querySelector('.contextual-menu-item[data-action="play-pause-audio"]');
                     if(audioButton) audioButton.title = "Play Sentence Audio";
                 }
-                // Don't remove 'playing-sentence' class here if we want highlight to persist after audio ends
-                // Only remove it if another sentence is played or mode changes.
             }; 
         } 
     } else {
