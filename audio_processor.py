@@ -1,4 +1,3 @@
-# bilingual_app/audio_processor.py
 import os
 import subprocess
 import tempfile 
@@ -6,9 +5,24 @@ import re
 import shlex
 from pathlib import Path 
 import locale 
+import math
+import hashlib # Added for checksum calculation
 
 from pydub import AudioSegment # Keep for now, might be used if direct ffmpeg fails or for other tasks
 from pydub.exceptions import CouldntEncodeError, CouldntDecodeError
+
+def calculate_sha256_checksum(file_path_str, logger=None):
+    """Calculates SHA256 checksum of a file and returns it as a hex string."""
+    sha256_hash = hashlib.sha256()
+    try:
+        with open(file_path_str, "rb") as f:
+            # Read and update hash string value in blocks of 4K
+            for byte_block in iter(lambda: f.read(4096), b""):
+                sha256_hash.update(byte_block)
+        return sha256_hash.hexdigest()
+    except IOError as e:
+        if logger: logger.error(f"AUDIO_PROC: Error reading file {file_path_str} for checksum: {e}")
+        return None
 
 def extract_english_sentences_for_aeneas(bilingual_file_content_string, logger=None):
     english_sentences = []
@@ -81,8 +95,8 @@ def convert_to_mp3(source_path_str, output_dir_str, logger=None):
         "-i", str(source_path),
         "-vn",
         "-c:a", "libmp3lame",
-        "-q:a", "2",
-        "-y",
+        "-q:a", "2", # VBR quality, 0-9, 2 is very good.
+        "-y", # Overwrite output without asking
         str(target_mp3_path)
     ]
     
@@ -300,3 +314,151 @@ def ms_to_srt_time(ms_total):
     m = int(m_total % 60)
     h = int(m_total // 60)
     return f"{h:02d}:{m:02d}:{s:02d},{ms:03d}"
+
+
+def get_audio_duration_ms(audio_path_str, logger=None):
+    """Gets audio duration in milliseconds using ffprobe."""
+    cmd = [
+        "ffprobe",
+        "-v", "error",
+        "-show_entries", "format=duration",
+        "-of", "default=noprint_wrappers=1:nokey=1",
+        str(audio_path_str)
+    ]
+    try:
+        result = subprocess.run(cmd, capture_output=True, text=True, check=True)
+        duration_sec = float(result.stdout.strip())
+        if logger: logger.info(f"AUDIO_PROC: Duration of {audio_path_str}: {duration_sec}s")
+        return int(duration_sec * 1000)
+    except (subprocess.CalledProcessError, ValueError) as e:
+        if logger: logger.error(f"AUDIO_PROC: Failed to get duration for {audio_path_str}: {e}")
+        return None
+    except FileNotFoundError:
+        if logger: logger.error("AUDIO_PROC: ffprobe not found. Cannot get audio duration.")
+        raise Exception("ffprobe not found. Please ensure FFmpeg (which includes ffprobe) is installed and in PATH.")
+
+
+def split_mp3_by_sentence_duration(original_mp3_path, sentences_info, 
+                                   max_part_size_bytes, output_parts_dir, 
+                                   article_filename_base, logger=None):
+    """
+    Splits an MP3 file into parts based on sentence durations, aiming for max_part_size_bytes.
+    sentences_info: list of dicts like {'id': sentence_db_id, 'original_start_ms': X, 'original_end_ms': Y}
+    Returns: {'num_parts': N, 'sentence_part_updates': list_of_db_updates, 'part_checksums': list_of_checksum_strings}
+    """
+    if not sentences_info:
+        if logger: logger.warning("AUDIO_PROC: No sentences_info provided for splitting. Aborting.")
+        return {'num_parts': 0, 'sentence_part_updates': [], 'part_checksums': []}
+
+    original_mp3_path_obj = Path(original_mp3_path)
+    output_parts_dir_obj = Path(output_parts_dir)
+    output_parts_dir_obj.mkdir(parents=True, exist_ok=True)
+
+    total_original_duration_ms = get_audio_duration_ms(original_mp3_path, logger=logger)
+    original_file_size_bytes = original_mp3_path_obj.stat().st_size
+
+    if total_original_duration_ms is None or total_original_duration_ms == 0:
+        if logger: logger.error(f"AUDIO_PROC: Could not determine duration or duration is zero for {original_mp3_path}. Cannot split.")
+        return {'num_parts': 0, 'sentence_part_updates': [], 'part_checksums': []}
+
+    if original_file_size_bytes == 0:
+        if logger: logger.error(f"AUDIO_PROC: Original MP3 file {original_mp3_path} has zero size. Cannot determine split ratio.")
+        return {'num_parts': 0, 'sentence_part_updates': [], 'part_checksums': []}
+        
+    target_duration_ms_per_part = math.floor((max_part_size_bytes / original_file_size_bytes) * total_original_duration_ms)
+    if logger: logger.info(f"AUDIO_PROC: Splitting {original_mp3_path}. Original size: {original_file_size_bytes}B, duration: {total_original_duration_ms}ms. Target part size: {max_part_size_bytes}B, target part duration: {target_duration_ms_per_part}ms.")
+
+    sentence_part_updates = []
+    current_part_idx = 0
+    sentence_cursor = 0
+    parts_created_paths = []
+    part_checksums = [] # List to store checksums of successfully created parts
+
+    while sentence_cursor < len(sentences_info):
+        part_sentences = []
+        current_part_accumulated_duration_ms = 0
+        part_start_original_ms = sentences_info[sentence_cursor]['original_start_ms']
+        
+        while sentence_cursor < len(sentences_info):
+            sentence = sentences_info[sentence_cursor]
+            sentence_duration_ms = sentence['original_end_ms'] - sentence['original_start_ms']
+            if sentence_duration_ms < 0: sentence_duration_ms = 0 
+            if sentence_duration_ms == 0: sentence_duration_ms = 50 
+
+            if part_sentences and (current_part_accumulated_duration_ms + sentence_duration_ms > target_duration_ms_per_part):
+                break 
+            
+            part_sentences.append(sentence)
+            current_part_accumulated_duration_ms += sentence_duration_ms
+            sentence_cursor += 1
+            
+            if len(part_sentences) == 1 and current_part_accumulated_duration_ms >= target_duration_ms_per_part * 0.9:
+                break
+
+        if not part_sentences: 
+            if logger: logger.warning("AUDIO_PROC: No sentences collected for a part, breaking split loop.")
+            break
+
+        part_end_original_ms = part_sentences[-1]['original_end_ms']
+        part_output_filename = f"{article_filename_base}_part_{current_part_idx}.mp3"
+        part_output_path = output_parts_dir_obj / part_output_filename
+
+        ffmpeg_start_sec = max(0, part_start_original_ms / 1000.0)
+        ffmpeg_to_sec = min(total_original_duration_ms / 1000.0, part_end_original_ms / 1000.0)
+        
+        if ffmpeg_to_sec <= ffmpeg_start_sec : 
+            if logger: logger.warning(f"AUDIO_PROC: Calculated zero or negative duration for part {current_part_idx} (start: {ffmpeg_start_sec}s, to: {ffmpeg_to_sec}s). Skipping this part extraction.")
+            continue 
+
+        cmd_split = [
+            "ffmpeg", "-y", "-i", str(original_mp3_path_obj),
+            "-ss", str(ffmpeg_start_sec),
+            "-to", str(ffmpeg_to_sec),
+            "-c", "copy", 
+            str(part_output_path)
+        ]
+        if logger: logger.info(f"AUDIO_PROC: Splitting command: {' '.join(shlex.quote(c) for c in cmd_split)}")
+        
+        checksum_for_this_part = None # Initialize for this part
+        try:
+            split_process = subprocess.run(cmd_split, check=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+            if logger: 
+                logger.info(f"AUDIO_PROC: Created part {part_output_path}")
+                if split_process.stderr: logger.debug(f"AUDIO_PROC: ffmpeg split stderr: {split_process.stderr.decode(errors='ignore')}")
+            
+            # Calculate checksum for the successfully created part
+            checksum_for_this_part = calculate_sha256_checksum(str(part_output_path), logger=logger)
+            if checksum_for_this_part:
+                if logger: logger.info(f"AUDIO_PROC: Calculated SHA256 for {part_output_path}: {checksum_for_this_part[:10]}...")
+            else:
+                if logger: logger.warning(f"AUDIO_PROC: Failed to calculate checksum for successfully created part {part_output_path}.")
+            
+            parts_created_paths.append(str(part_output_path))
+            part_checksums.append(checksum_for_this_part if checksum_for_this_part else "") # Add checksum or "" if failed
+
+            for sent_in_part in part_sentences:
+                sentence_part_updates.append({
+                    'sentence_db_id': sent_in_part['id'],
+                    'audio_part_index': current_part_idx,
+                    'start_time_in_part_ms': sent_in_part['original_start_ms'] - part_start_original_ms,
+                    'end_time_in_part_ms': sent_in_part['original_end_ms'] - part_start_original_ms,
+                })
+        except subprocess.CalledProcessError as e:
+            if logger: logger.error(f"AUDIO_PROC: Failed to create part {current_part_idx} (cmd: {' '.join(shlex.quote(c) for c in cmd_split)}): {e.stderr.decode(errors='ignore') if e.stderr else e}")
+            # If part creation fails, we don't add to parts_created_paths or part_checksums
+
+        current_part_idx += 1
+
+    num_parts_successfully_created = len(parts_created_paths)
+    # Ensure part_checksums list has the same length as successfully created parts
+    if len(part_checksums) != num_parts_successfully_created:
+        if logger: logger.error(f"AUDIO_PROC: Mismatch between number of created parts ({num_parts_successfully_created}) and checksums generated ({len(part_checksums)}). This should not happen.")
+        # Potentially adjust part_checksums here if strict alignment is needed, though current logic should align.
+
+    if logger: logger.info(f"AUDIO_PROC: Splitting complete. {num_parts_successfully_created} parts created. {len(sentence_part_updates)} sentence updates prepared. {len(part_checksums)} checksums recorded.")
+    
+    return {
+        'num_parts': num_parts_successfully_created, 
+        'sentence_part_updates': sentence_part_updates,
+        'part_checksums': part_checksums # List of checksum strings (or "" for failures)
+    }

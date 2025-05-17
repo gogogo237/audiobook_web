@@ -183,6 +183,42 @@
     #restoreLocationButton:hover {
         background-color: #5a6268;
     }
+    
+    /* Styles for audio parts controls */
+    #audiobook-parts-controls, #parts-audio-download { /* Combined download controls style */
+        margin-top: 15px;
+        padding: 10px;
+        background-color: #e9ecef;
+        border: 1px solid #ced4da;
+        border-radius: 4px;
+    }
+    #audio-part-selector-playback label, #audio-part-selector-download label { /* Combined selector label style */
+        margin-right: 10px;
+        font-weight: normal;
+    }
+    #audio-part-selector-playback input[type="radio"], #audio-part-selector-download input[type="radio"] { /* Combined radio style */
+        margin-right: 5px;
+        vertical-align: middle;
+    }
+    #loadSelectedAudioPartButton, #downloadSelectedAudioPartButton, #switchToPartsViewButton, #switchToFullViewButton,
+    #loadLocalAudioPartButton { /* Added new button */
+        padding: 6px 12px;
+        background-color: #007bff;
+        color: white;
+        border: none;
+        border-radius: 4px;
+        cursor: pointer;
+        margin-left:10px;
+        margin-top: 5px; 
+        margin-bottom: 5px;
+    }
+    #loadSelectedAudioPartButton:hover, #downloadSelectedAudioPartButton:hover, #switchToPartsViewButton:hover, #switchToFullViewButton:hover,
+    #loadLocalAudioPartButton:hover { /* Added new button hover */
+        background-color: #0056b3;
+    }
+    #audio-part-selector-playback, #audio-part-selector-download {
+        margin-bottom: 10px; /* Space before the button */
+    }
 
 </style>
 {% endblock %}
@@ -205,20 +241,45 @@
     <div id="python-debug-info" style="display:none;">
         Python `has_timestamps`: {{ has_timestamps|tojson }}
         Python `article.converted_mp3_path`: {{ article.converted_mp3_path|tojson }}
+        Python `article.mp3_parts_folder_path`: {{ article.mp3_parts_folder_path|tojson }}
+        Python `article.num_audio_parts`: {{ article.num_audio_parts|tojson }}
         Python `reading_location`: {{ reading_location|tojson }}
+        Python `article_audio_part_checksums`: {{ article_audio_part_checksums|tojson }}
     </div>
 
+    {% if article.mp3_parts_folder_path and article.num_audio_parts and article.num_audio_parts > 0 %}
+        <button id="switchToPartsViewButton">Switch to Audio Parts View</button>
+        <button id="switchToFullViewButton" style="display:none;">Switch to Full Audio View</button>
+    {% endif %}
+
     {% if has_timestamps %}
-    <div class="audiobook-controls">
-        <button id="toggleAudiobookMode">Enable Audiobook Mode</button>
-        <input type="file" id="localAudioFile" accept=".mp3,.wav,.m4a" style="display: none;">
-        <span id="audioFileName" style="margin-left: 10px;">No audio file selected.</span>
-        <audio id="audioPlayer" controls></audio> 
-        <p id="audiobookHint" style="font-size:0.9em; color: #555; margin-top: 5px; display:none;">
-            Select your local audio file. Click on an English sentence to play its audio. (Using Web Audio API for playback)
-        </p>
-    </div>
-    {% else %}
+        <div id="full-audio-view-controls">
+            <div class="audiobook-controls">
+                <button id="toggleAudiobookMode">Enable Audiobook Mode (Full Audio)</button>
+                <input type="file" id="localAudioFile" accept=".mp3,.wav,.m4a" style="display: none;">
+                <span id="audioFileName" style="margin-left: 10px;">No audio file selected.</span>
+                <audio id="audioPlayer" controls></audio> 
+                <p id="audiobookHint" style="font-size:0.9em; color: #555; margin-top: 5px; display:none;">
+                    Select your local FULL audio file. Click on an English sentence to play its audio.
+                </p>
+            </div>
+        </div>
+
+        <div id="parts-audio-view-controls" style="display:none;">
+             <div id="audiobook-parts-controls">
+                <p><strong>Audiobook Mode (Audio Parts)</strong></p>
+                <p>Select Audio Part to load for playback:</p>
+                <div id="audio-part-selector-playback">
+                    <!-- Radio buttons will be populated by JS -->
+                </div>
+                <button id="loadSelectedAudioPartButton">Load Part (Server)</button>
+                <button id="loadLocalAudioPartButton" style="margin-left: 5px;">Load Part (Local File)</button>
+                <input type="file" id="localAudioPartFileInput" accept=".mp3" style="display: none;">
+                <span id="loadedAudioPartName" style="margin-left: 10px;">No part loaded.</span>
+                <p id="audiobookPartsHint" style="font-size:0.9em; color: #555; margin-top: 5px;">Click a sentence to play. If it's in a different part, you'll be prompted to load it.</p>
+            </div>
+        </div>
+    {% else %} {# no timestamps at all #}
     <p><em>Audio timestamps not available for this article. 
         <a href="{{ url_for('align_audio_for_article', article_id=article.id) }}">Align Audio?</a>
     </em></p>
@@ -226,7 +287,18 @@
 
     {% if article.converted_mp3_path %}
     <div style="margin-bottom: 15px;">
-        <a href="{{ url_for('download_mp3_for_article', article_id=article.id) }}" class="download-mp3-button">Download Converted Audio (MP3)</a>
+        <div id="full-audio-download">
+            <a href="{{ url_for('download_mp3_for_article', article_id=article.id) }}" class="download-mp3-button">Download Full Audio (MP3)</a>
+        </div>
+        {% if article.mp3_parts_folder_path and article.num_audio_parts and article.num_audio_parts > 0 %}
+        <div id="parts-audio-download" style="display:none;">
+            <p><strong>Download Audio Part:</strong></p>
+            <div id="audio-part-selector-download">
+                <!-- Radio buttons will be populated by JS -->
+            </div>
+            <button id="downloadSelectedAudioPartButton">Download Selected Part</button>
+        </div>
+        {% endif %}
     </div>
     {% endif %}
 
@@ -242,7 +314,12 @@
                                   data-paragraph-index="{{ sentence_pair.paragraph_index }}"
                                   data-sentence-index="{{ sentence_pair.sentence_index_in_paragraph }}"
                                   {% if sentence_pair.start_time_ms is not none %} data-start-time-ms="{{ sentence_pair.start_time_ms }}"{% endif %}
-                                  {% if sentence_pair.end_time_ms is not none %} data-end-time-ms="{{ sentence_pair.end_time_ms }}"{% endif %}>
+                                  {% if sentence_pair.end_time_ms is not none %} data-end-time-ms="{{ sentence_pair.end_time_ms }}"{% endif %}
+                                  {% if article.num_audio_parts and article.num_audio_parts > 0 %}
+                                    {% if sentence_pair.audio_part_index is not none %} data-audio-part-index="{{ sentence_pair.audio_part_index }}"{% endif %}
+                                    {% if sentence_pair.start_time_in_part_ms is not none %} data-start-time-in-part-ms="{{ sentence_pair.start_time_in_part_ms }}"{% endif %}
+                                    {% if sentence_pair.end_time_in_part_ms is not none %} data-end-time-in-part-ms="{{ sentence_pair.end_time_in_part_ms }}"{% endif %}
+                                  {% endif %}>
                                 {{- sentence_pair.english -}}
                             </span>{{- " " -}}
                         {%- endfor -%}
@@ -267,14 +344,20 @@
 document.addEventListener('DOMContentLoaded', function() {
     let pythonHasTimestamps = false;
     let pythonConvertedMp3Path = null;
-    let initialReadingLocation = null; // Will hold {paragraph_index: X, sentence_index_in_paragraph: Y} or null
+    let pythonMp3PartsFolderPath = null;
+    let pythonNumAudioParts = 0;
+    let pythonArticleAudioPartChecksums = null; // For concatenated checksum string
+    let expectedChecksumsArray = []; // Parsed array of checksums
+    const AUDIO_PART_CHECKSUM_DELIMITER_JS = ";"; // Must match db_manager.py
+
+    let initialReadingLocation = null; 
     const articleId = {{ article.id }};
 
     try {
         const debugInfoElement = document.getElementById('python-debug-info');
         if (debugInfoElement) {
             const textContent = debugInfoElement.textContent;
-            // More robust parsing for multiple JSON objects
+            // ... (existing parsing for other python vars)
             const hasTimestampsMatch = textContent.match(/`has_timestamps`:\s*([^\n`]+)/);
             if (hasTimestampsMatch && hasTimestampsMatch[1]) {
                 pythonHasTimestamps = JSON.parse(hasTimestampsMatch[1].trim());
@@ -283,10 +366,31 @@ document.addEventListener('DOMContentLoaded', function() {
             if (mp3PathMatch && mp3PathMatch[1]) {
                 pythonConvertedMp3Path = JSON.parse(mp3PathMatch[1].trim());
             }
+            const partsPathMatch = textContent.match(/`article.mp3_parts_folder_path`:\s*([^\n`]+)/);
+            if (partsPathMatch && partsPathMatch[1]) {
+                pythonMp3PartsFolderPath = JSON.parse(partsPathMatch[1].trim());
+            }
+            const numPartsMatch = textContent.match(/`article.num_audio_parts`:\s*([^\n`]+)/);
+            if (numPartsMatch && numPartsMatch[1]) {
+                const parsedNum = JSON.parse(numPartsMatch[1].trim());
+                pythonNumAudioParts = parsedNum === null ? 0 : parseInt(parsedNum, 10);
+            }
             const readingLocationMatch = textContent.match(/`reading_location`:\s*([^\n`]+)/);
             if (readingLocationMatch && readingLocationMatch[1]) {
                 initialReadingLocation = JSON.parse(readingLocationMatch[1].trim());
             }
+            const checksumsMatch = textContent.match(/`article_audio_part_checksums`:\s*([^\n`]+)/);
+            if (checksumsMatch && checksumsMatch[1]) {
+                const rawChecksumsStr = JSON.parse(checksumsMatch[1].trim());
+                if (rawChecksumsStr && typeof rawChecksumsStr === 'string') {
+                    pythonArticleAudioPartChecksums = rawChecksumsStr;
+                    expectedChecksumsArray = pythonArticleAudioPartChecksums.split(AUDIO_PART_CHECKSUM_DELIMITER_JS);
+                    console.log(`JS: Parsed ${expectedChecksumsArray.length} expected checksums. First: ${expectedChecksumsArray.length > 0 ? expectedChecksumsArray[0].substring(0,10) + "..." : "N/A"}`);
+                } else {
+                    console.log("JS: No valid audio part checksums string received from Python.");
+                }
+            }
+            console.log("JS: Num audio parts from Python:", pythonNumAudioParts);
         }
     } catch (e) {
         console.error("JS: Error parsing python-debug-info:", e);
@@ -299,22 +403,59 @@ document.addEventListener('DOMContentLoaded', function() {
     let currentPopupTargetSentence = null;
     const contextualMenu = document.getElementById('contextual-menu');
     const goBackButton = document.getElementById('goBackButton');
-    const goToTopButton = document.getElementById('goToTopButton'); // New button
+    const goToTopButton = document.getElementById('goToTopButton'); 
     const restoreLocationButton = document.getElementById('restoreLocationButton');
 
     let audioContext = null;
     let audioBuffer = null;
     let currentSourceNode = null;
-    let isAudiobookMode = false;
+    let isAudiobookModeFull = false; 
+    let isAudiobookModeParts = false; 
     let currentPlayingSentence = null;
     let maxSentenceEndTime = 0; 
+    let currentLoadedAudioPartIndex = -1; 
 
     const toggleAudiobookModeButton = document.getElementById('toggleAudiobookMode');
     const localAudioFileInput = document.getElementById('localAudioFile');
     const audioFileNameSpan = document.getElementById('audioFileName');
     const audiobookHint = document.getElementById('audiobookHint');
 
+    const switchToPartsViewButton = document.getElementById('switchToPartsViewButton');
+    const switchToFullViewButton = document.getElementById('switchToFullViewButton');
+    const fullAudioViewControls = document.getElementById('full-audio-view-controls');
+    const partsAudioViewControls = document.getElementById('parts-audio-view-controls');
+    const fullAudioDownloadDiv = document.getElementById('full-audio-download');
+    const partsAudioDownloadDiv = document.getElementById('parts-audio-download');
+    const loadSelectedAudioPartButton = document.getElementById('loadSelectedAudioPartButton'); // Server load
+    const loadLocalAudioPartButton = document.getElementById('loadLocalAudioPartButton'); // Local load
+    const localAudioPartFileInput = document.getElementById('localAudioPartFileInput'); // Hidden input for local part
+    const downloadSelectedAudioPartButton = document.getElementById('downloadSelectedAudioPartButton');
+    const loadedAudioPartNameSpan = document.getElementById('loadedAudioPartName');
+
+    function initAudioContextGlobally() {
+        if (!audioContext) {
+            try {
+                audioContext = new (window.AudioContext || window.webkitAudioContext)();
+                 console.log("JS: AudioContext initialized/resumed.");
+            } catch (e) {
+                alert("Web Audio API is not supported by this browser."); return false;
+            }
+        }
+        if (audioContext.state === 'suspended') {
+            audioContext.resume().then(() => {
+                 console.log("JS: AudioContext resumed successfully.");
+            }).catch(e => {
+                console.error("JS: Failed to resume AudioContext:", e);
+                alert("Could not resume audio context. Please interact with the page (e.g., click) and try again.");
+            });
+        }
+        return true;
+    }
+    initAudioContextGlobally(); 
+
+
     // --- Reading Location Logic ---
+    // ... (existing saveCurrentLocation, findSentenceElement, checkAutoSave, restoreLocationButton logic) ...
     let validClickCounter = 0;
     const CLICK_THRESHOLD_AUTOSAVE = 5;
 
@@ -379,8 +520,8 @@ document.addEventListener('DOMContentLoaded', function() {
         }
     }
 
-
     // --- Go Back Button Logic ---
+    // ... (existing updateGoBackButtonVisibility, goBackButton event listener) ...
     function updateGoBackButtonVisibility() {
         if (lastHighlightedSentenceElement && (window.scrollY > 100 || document.documentElement.scrollTop > 100)) { 
             const sentenceRect = lastHighlightedSentenceElement.getBoundingClientRect();
@@ -409,17 +550,18 @@ document.addEventListener('DOMContentLoaded', function() {
     }
 
     // --- Go To Top Button Logic ---
+    // ... (existing updateGoToTopButtonVisibility, goToTopButton event listener) ...
     let lastScrollTop = 0;
-    const scrollThreshold = 150; // Min scroll distance to show button
+    const scrollThreshold = 150; 
 
     function updateGoToTopButtonVisibility() {
         let st = window.pageYOffset || document.documentElement.scrollTop;
-        if (st < lastScrollTop && st > scrollThreshold) { // Scrolling Up and not at top
+        if (st < lastScrollTop && st > scrollThreshold) { 
             goToTopButton.classList.add('visible');
-        } else { // Scrolling Down or at/near top
+        } else { 
             goToTopButton.classList.remove('visible');
         }
-        lastScrollTop = st <= 0 ? 0 : st; // For Mobile or negative scrolling
+        lastScrollTop = st <= 0 ? 0 : st; 
     }
 
     if (goToTopButton) {
@@ -428,11 +570,15 @@ document.addEventListener('DOMContentLoaded', function() {
         });
         window.addEventListener('scroll', updateGoToTopButtonVisibility);
         window.addEventListener('resize', updateGoToTopButtonVisibility);
-        updateGoToTopButtonVisibility(); // Initial check
+        updateGoToTopButtonVisibility(); 
     }
 
-
     // --- Contextual Menu & Popups ---
+    // ... (existing displayPopup, hideContextualMenu, hideTranslationPopup, populateAndShowContextualMenu logic) ...
+    // ... (articleContentWrapper 'contextmenu' and 'click' listeners) ...
+    // ... (contextualMenu 'click' listener) ...
+    // ... (popup 'click' listener) ...
+    // ... (document 'click' listener for hiding menu/popup) ...
     function displayPopup(targetElement, content) { 
         popup.innerHTML = content;
         const rect = targetElement.getBoundingClientRect();
@@ -485,9 +631,13 @@ document.addEventListener('DOMContentLoaded', function() {
 
         let menuHTML = `<div class="contextual-menu-item" data-action="show-translation" title="Show Chinese Translation"><span class="menu-icon">💬</span><span class="menu-text">Translate</span></div>`;
         menuHTML += `<div class="contextual-menu-item" data-action="save-location" title="Save this reading location"><span class="menu-icon">💾</span><span class="menu-text">Save Spot</span></div>`;
-        // "Go to Top" removed from here
+        
+        const canPlayAudio = (isAudiobookModeFull && audioContext && audioBuffer && pythonHasTimestamps) ||
+                             (isAudiobookModeParts && audioContext && audioBuffer && pythonHasTimestamps && currentLoadedAudioPartIndex !== -1 && 
+                              parseInt(sentenceElement.dataset.audioPartIndex, 10) === currentLoadedAudioPartIndex);
 
-        if (isAudiobookMode && audioContext && audioBuffer && pythonHasTimestamps) {
+
+        if (canPlayAudio) {
             let audioIcon = "▶️"; 
             let audioTitle = "Play Sentence Audio";
             if (currentPlayingSentence === sentenceElement && currentSourceNode) {
@@ -545,10 +695,10 @@ document.addEventListener('DOMContentLoaded', function() {
                 if (translation) {
                     displayPopup(targetSentence, translation);
                     currentPopupTargetSentence = targetSentence;
-                } else {
+                } else { 
                     displayPopup(targetSentence, "No translation available for this sentence.");
                 }
-                if (!isAudiobookMode) { 
+                if (!((isAudiobookModeFull || isAudiobookModeParts) && currentPlayingSentence === targetSentence)) {
                     if (highlightedSentence && highlightedSentence !== targetSentence) {
                          highlightedSentence.classList.remove('highlighted-sentence');
                          validClickCounter++;
@@ -573,13 +723,13 @@ document.addEventListener('DOMContentLoaded', function() {
                 event.stopPropagation(); 
                 hideTranslationPopup(); 
 
-                if (highlightedSentence === targetSentence) {
+                if (highlightedSentence === targetSentence) { 
                     if (contextualMenu.style.display === 'block' && contextualMenu.style.opacity === '1') {
                         hideContextualMenu();
                     } else {
                         populateAndShowContextualMenu(targetSentence, event.clientX);
                     }
-                } else { // New sentence clicked
+                } else { 
                     if (highlightedSentence) {
                         highlightedSentence.classList.remove('highlighted-sentence');
                     }
@@ -592,13 +742,33 @@ document.addEventListener('DOMContentLoaded', function() {
                     validClickCounter++; 
                     checkAutoSave();
 
-                    if (isAudiobookMode && audioContext && audioBuffer) {
-                        playSentenceAudio(targetSentence); 
-                    } else if (isAudiobookMode && (!audioContext || !audioBuffer)) {
-                        console.log("JS: Audiobook mode active, but audio not loaded/ready.");
+                    if (isAudiobookModeFull && audioContext && audioBuffer) {
+                        playSentenceAudio(targetSentence, false); 
+                    } else if (isAudiobookModeParts && audioContext && audioBuffer) {
+                        const sentencePartIndexStr = targetSentence.dataset.audioPartIndex;
+                        if (typeof sentencePartIndexStr === 'undefined') {
+                             alert("This sentence is not assigned to an audio part. Timestamps may be missing or parts not generated correctly.");
+                        } else {
+                            const sentencePartIndex = parseInt(sentencePartIndexStr, 10);
+                            if (sentencePartIndex !== currentLoadedAudioPartIndex) {
+                                alert(`This sentence is in audio part ${sentencePartIndex + 1}. Please load part ${sentencePartIndex + 1} first.`);
+                                const radioToSelect = document.querySelector(`#audio-part-selector-playback input[name="audio_part_playback"][value="${sentencePartIndex}"]`);
+                                if (radioToSelect) {
+                                    radioToSelect.checked = true;
+                                }
+                            } else {
+                                playSentenceAudio(targetSentence, true); 
+                            }
+                        }
+                    } else if ((isAudiobookModeFull || isAudiobookModeParts) && (!audioContext || !audioBuffer)) {
+                         if (isAudiobookModeFull) console.log("JS: Full audiobook mode active, but audio not loaded/ready.");
+                         if (isAudiobookModeParts && pythonNumAudioParts > 0) { 
+                             console.log("JS: Parts audiobook mode active, but audio part not loaded/ready.");
+                             alert("Please load an audio part first using the controls above.");
+                         }
                     }
                 }
-            } else {
+            } else { 
                 if (!contextualMenu.contains(event.target)) { 
                     hideContextualMenu();
                 }
@@ -609,7 +779,7 @@ document.addEventListener('DOMContentLoaded', function() {
                     !contextualMenu.contains(event.target) && 
                     !popup.contains(event.target) &&
                     !goBackButton.contains(event.target) &&
-                    !goToTopButton.contains(event.target) ) { // Also check goToTopButton
+                    !goToTopButton.contains(event.target) ) { 
                     highlightedSentence.classList.remove('highlighted-sentence');
                     highlightedSentence = null;
                     updateGoBackButtonVisibility(); 
@@ -629,7 +799,6 @@ document.addEventListener('DOMContentLoaded', function() {
 
             const action = actionTarget.dataset.action;
             switch (action) {
-                // Case 'go-to-top' removed
                 case 'show-translation':
                     const translation = highlightedSentence.dataset.translation;
                     if (translation) {
@@ -649,24 +818,36 @@ document.addEventListener('DOMContentLoaded', function() {
                     }
                     break;
                 case 'play-pause-audio':
-                    if (isAudiobookMode && audioContext && audioBuffer && pythonHasTimestamps) {
+                    let playAsPart = false;
+                    let canPlayThis = false;
+
+                    if (isAudiobookModeFull && audioContext && audioBuffer && pythonHasTimestamps) {
+                        canPlayThis = true;
+                        playAsPart = false;
+                    } else if (isAudiobookModeParts && audioContext && audioBuffer && pythonHasTimestamps && currentLoadedAudioPartIndex !== -1) {
+                         const sentencePartIndex = parseInt(highlightedSentence.dataset.audioPartIndex, 10);
+                         if (sentencePartIndex === currentLoadedAudioPartIndex) {
+                            canPlayThis = true;
+                            playAsPart = true;
+                         } 
+                    }
+                    if (canPlayThis) {
                         const iconSpan = actionTarget.querySelector('.menu-icon');
-                        if (currentPlayingSentence === highlightedSentence && currentSourceNode) {
-                            if (currentSourceNode) {
-                                try { currentSourceNode.onended = null; currentSourceNode.stop(); currentSourceNode.disconnect(); } catch(e){}
-                                currentSourceNode = null;
-                            }
+                        if (currentPlayingSentence === highlightedSentence && currentSourceNode) { 
+                            stopCurrentAudio();
                             if (currentPlayingSentence) currentPlayingSentence.classList.remove('playing-sentence');
                             if (iconSpan) iconSpan.textContent = "▶️";
                             actionTarget.title = "Play Sentence Audio";
-                        } else {
-                            playSentenceAudio(highlightedSentence); 
+                        } else { 
+                            playSentenceAudio(highlightedSentence, playAsPart); 
                             if (iconSpan) iconSpan.textContent = "⏹️";
                             actionTarget.title = "Stop Sentence Audio";
                             validClickCounter++; 
                             checkAutoSave();
                         }
-                    }
+                    } else {
+                         alert("Audio not ready or sentence part mismatch. Please load the correct audio/part.");
+                    } 
                     break;
             }
             hideContextualMenu();
@@ -693,40 +874,30 @@ document.addEventListener('DOMContentLoaded', function() {
             hideTranslationPopup();
         }
         updateGoBackButtonVisibility(); 
-        // updateGoToTopButtonVisibility(); // Not strictly needed here, scroll handles it
     });
-    
-    // --- Audiobook Mode Logic ---
-    if (toggleAudiobookModeButton) {
-        function initAudioContext() {
-            if (!audioContext) {
-                try {
-                    audioContext = new (window.AudioContext || window.webkitAudioContext)();
-                } catch (e) {
-                    alert("Web Audio API is not supported by this browser."); return false;
-                }
-            }
-            if (audioContext.state === 'suspended') audioContext.resume();
-            return true;
-        }
-        
+
+    // --- Full Audiobook Mode Logic ---
+    // ... (existing toggleAudiobookModeButton, localAudioFileInput listeners, playSentenceAudio, proceedWithPlayback, stopCurrentAudio) ...
+        if (toggleAudiobookModeButton) {        
         document.querySelectorAll('.english-sentence').forEach(s => {
             const endTime = parseInt(s.dataset.endTimeMs, 10);
             if (!isNaN(endTime) && endTime > maxSentenceEndTime) maxSentenceEndTime = endTime;
         });
 
         toggleAudiobookModeButton.addEventListener('click', function() {
-            if (!initAudioContext() && !isAudiobookMode) return;
-            isAudiobookMode = !isAudiobookMode;
-            if (isAudiobookMode) {
-                toggleAudiobookModeButton.textContent = 'Disable Audiobook Mode';
+            if (!initAudioContextGlobally() && !isAudiobookModeFull) return;
+            isAudiobookModeFull = !isAudiobookModeFull;
+            if (isAudiobookModeFull) {
+                toggleAudiobookModeButton.textContent = 'Disable Audiobook Mode (Full)';
                 localAudioFileInput.style.display = 'inline-block';
                 audiobookHint.style.display = 'block';
+                isAudiobookModeParts = false; 
+                updatePartsViewModeUI(); 
             } else { 
-                toggleAudiobookModeButton.textContent = 'Enable Audiobook Mode';
+                toggleAudiobookModeButton.textContent = 'Enable Audiobook Mode (Full Audio)';
                 localAudioFileInput.style.display = 'none';
                 audiobookHint.style.display = 'none';
-                if (currentSourceNode) { try { currentSourceNode.stop(); } catch(e){} currentSourceNode = null; }
+                stopCurrentAudio();
                 if (currentPlayingSentence) currentPlayingSentence.classList.remove('playing-sentence');
                 currentPlayingSentence = null;
             }
@@ -737,11 +908,11 @@ document.addEventListener('DOMContentLoaded', function() {
         });
 
         localAudioFileInput.addEventListener('change', async function(event) {
-            if (!audioContext && !initAudioContext()) return;
+            if (!initAudioContextGlobally()) return;
             const file = event.target.files[0];
             if (file) {
                 audioFileNameSpan.textContent = "Loading: " + file.name;
-                if (currentSourceNode) { try { currentSourceNode.stop(); } catch(e){} currentSourceNode = null; }
+                stopCurrentAudio();
                 if (currentPlayingSentence) currentPlayingSentence.classList.remove('playing-sentence');
                 currentPlayingSentence = null;
                 audioBuffer = null; 
@@ -760,43 +931,53 @@ document.addEventListener('DOMContentLoaded', function() {
             }
         });
 
-        function playSentenceAudio(sentenceElement) {
+        function playSentenceAudio(sentenceElement, isPlayingFromPart) {
             if (!audioContext || audioContext.state === 'closed') { alert("Audio system error."); return; }
             if (audioContext.state === 'suspended') {
-                audioContext.resume().then(() => proceedWithPlayback(sentenceElement))
-                                  .catch(e => { alert("Could not start audio."); });
+                audioContext.resume().then(() => proceedWithPlayback(sentenceElement, isPlayingFromPart))
+                                  .catch(e => { alert("Could not start audio playback. Please interact with the page and try again."); });
             } else {
-                proceedWithPlayback(sentenceElement);
+                proceedWithPlayback(sentenceElement, isPlayingFromPart);
             }
         }
         
-        function proceedWithPlayback(sentenceElement) {
-            if (!audioBuffer) { alert("Please load an audio file first."); return; }
-            
-            if (currentSourceNode) { 
-                try { currentSourceNode.onended = null; currentSourceNode.stop(); currentSourceNode.disconnect(); } catch (e) {} 
-                currentSourceNode = null;
+        function proceedWithPlayback(sentenceElement, isPlayingFromPart) {
+            if (!audioBuffer) { 
+                if (isAudiobookModeFull) alert("Please load the full audio file first."); 
+                else if (isAudiobookModeParts) alert("Please load the selected audio part first.");
+                return; 
             }
+            
+            stopCurrentAudio();
+
             if (currentPlayingSentence && currentPlayingSentence !== sentenceElement) {
                 currentPlayingSentence.classList.remove('playing-sentence');
             }
 
-            const startTimeMs = parseInt(sentenceElement.dataset.startTimeMs, 10);
-            const endTimeMs = parseInt(sentenceElement.dataset.endTimeMs, 10);
+            let startTimeMs, endTimeMs;
+            if (isPlayingFromPart) {
+                startTimeMs = parseInt(sentenceElement.dataset.startTimeInPartMs, 10);
+                endTimeMs = parseInt(sentenceElement.dataset.endTimeInPartMs, 10);
+            } else {
+                startTimeMs = parseInt(sentenceElement.dataset.startTimeMs, 10);
+                endTimeMs = parseInt(sentenceElement.dataset.endTimeMs, 10);
+            }
+
             if (isNaN(startTimeMs) || isNaN(endTimeMs)) { 
                 alert("Sentence missing time data. Cannot play audio."); 
                 return; 
             }
 
             const offsetInSeconds = startTimeMs / 1000.0;
-            let durationInSeconds = (endTimeMs - startTimeMs) / 1000.0;
+            const durationInSecondsRaw = (endTimeMs - startTimeMs) / 1000.0;
+
             if (offsetInSeconds < 0 || offsetInSeconds >= audioBuffer.duration) { 
-                alert("Sentence start time is out of audio bounds."); 
+                alert(`Sentence start time (${offsetInSeconds.toFixed(2)}s) is out of audio bounds (duration ${audioBuffer.duration.toFixed(2)}s).`); 
                 return; 
             }
-            if (durationInSeconds <= 0) durationInSeconds = 0.05; 
-            const clampedDuration = Math.min(durationInSeconds, audioBuffer.duration - offsetInSeconds);
-
+            let durationToPlay = durationInSecondsRaw <= 0 ? 0.05 : durationInSecondsRaw;
+            durationToPlay = Math.min(durationToPlay, audioBuffer.duration - offsetInSeconds);
+            
             currentPlayingSentence = sentenceElement;
             currentPlayingSentence.classList.add('playing-sentence');
             if (highlightedSentence && highlightedSentence !== currentPlayingSentence) {
@@ -807,13 +988,12 @@ document.addEventListener('DOMContentLoaded', function() {
             updateGoBackButtonVisibility();
             updateGoToTopButtonVisibility();
 
-
             currentSourceNode = audioContext.createBufferSource();
             currentSourceNode.buffer = audioBuffer;
             currentSourceNode.connect(audioContext.destination);
             
             try {
-                currentSourceNode.start(0, offsetInSeconds, clampedDuration); 
+                currentSourceNode.start(0, offsetInSeconds, durationToPlay); 
             } catch (e) {
                 alert(`Could not start playback: ${e.message}`);
                 if (currentPlayingSentence) currentPlayingSentence.classList.remove('playing-sentence');
@@ -823,8 +1003,8 @@ document.addEventListener('DOMContentLoaded', function() {
             }
             
             currentSourceNode.onended = () => {
-                if (currentSourceNode && !currentSourceNode.context) { 
-                    // No specific action needed for currentPlayingSentence highlight here
+                if (currentPlayingSentence === sentenceElement) { 
+                    currentPlayingSentence.classList.remove('playing-sentence');
                 }
                 if (contextualMenu.style.display === 'block' && highlightedSentence === sentenceElement) {
                     const audioButtonIcon = contextualMenu.querySelector('.contextual-menu-item[data-action="play-pause-audio"] .menu-icon');
@@ -834,8 +1014,259 @@ document.addEventListener('DOMContentLoaded', function() {
                 }
             }; 
         } 
+
+        function stopCurrentAudio() {
+            if (currentSourceNode) {
+                try { 
+                    currentSourceNode.onended = null; 
+                    currentSourceNode.stop(); 
+                    currentSourceNode.disconnect();
+                } catch (e) { /* ignore */ }
+                currentSourceNode = null;
+            }
+        }
     } else {
         console.log("JS: toggleAudiobookModeButton not found.");
+    }
+
+    // Helper function to convert ArrayBuffer to Hex String (for SHA256)
+    function arrayBufferToHexString(buffer) {
+        const byteArray = new Uint8Array(buffer);
+        let hexString = "";
+        for (let i = 0; i < byteArray.length; i++) {
+            const hex = byteArray[i].toString(16);
+            hexString += (hex.length === 1 ? "0" : "") + hex;
+        }
+        return hexString;
+    }
+
+    // --- Audio Parts View Logic ---
+    let isPartsViewActive = false;
+
+    function updatePartsViewModeUI() {
+        // ... (existing updatePartsViewModeUI logic) ...
+        if (isPartsViewActive) {
+            if(partsAudioViewControls) partsAudioViewControls.style.display = 'block';
+            if(fullAudioViewControls) fullAudioViewControls.style.display = 'none';
+            if(partsAudioDownloadDiv) partsAudioDownloadDiv.style.display = 'block';
+            if(fullAudioDownloadDiv) fullAudioDownloadDiv.style.display = 'none';
+            if(switchToPartsViewButton) switchToPartsViewButton.style.display = 'none';
+            if(switchToFullViewButton) switchToFullViewButton.style.display = 'inline-block';
+            
+            isAudiobookModeParts = true; 
+            isAudiobookModeFull = false; 
+            if (toggleAudiobookModeButton) {
+                 toggleAudiobookModeButton.textContent = 'Enable Audiobook Mode (Full Audio)';
+                 if(localAudioFileInput) localAudioFileInput.style.display = 'none';
+                 if(audioFileNameSpan) audioFileNameSpan.textContent = 'No audio file selected.';
+                 if(audiobookHint) audiobookHint.style.display = 'none';
+            }
+            stopCurrentAudio();
+            if(currentPlayingSentence) currentPlayingSentence.classList.remove('playing-sentence');
+            currentPlayingSentence = null;
+            audioBuffer = null; 
+            if(loadedAudioPartNameSpan) loadedAudioPartNameSpan.textContent = "No part loaded.";
+            currentLoadedAudioPartIndex = -1;
+
+        } else { 
+            if(partsAudioViewControls) partsAudioViewControls.style.display = 'none';
+            if(fullAudioViewControls) fullAudioViewControls.style.display = 'block';
+            if(partsAudioDownloadDiv) partsAudioDownloadDiv.style.display = 'none';
+            if(fullAudioDownloadDiv) fullAudioDownloadDiv.style.display = 'block';
+            if(switchToPartsViewButton) switchToPartsViewButton.style.display = 'inline-block';
+            if(switchToFullViewButton) switchToFullViewButton.style.display = 'none';
+            
+            isAudiobookModeParts = false;
+            stopCurrentAudio(); 
+            if(currentPlayingSentence) currentPlayingSentence.classList.remove('playing-sentence');
+        }
+    }
+
+
+    if (pythonNumAudioParts > 0 && pythonMp3PartsFolderPath) {
+        if (switchToPartsViewButton) {
+            switchToPartsViewButton.addEventListener('click', () => {
+                isPartsViewActive = true;
+                updatePartsViewModeUI();
+            });
+        }
+        if (switchToFullViewButton) {
+            switchToFullViewButton.addEventListener('click', () => {
+                isPartsViewActive = false;
+                updatePartsViewModeUI();
+            });
+        }
+
+        const playbackSelectorDiv = document.getElementById('audio-part-selector-playback');
+        const downloadSelectorDiv = document.getElementById('audio-part-selector-download');
+        if (playbackSelectorDiv && downloadSelectorDiv) {
+            for (let i = 0; i < pythonNumAudioParts; i++) {
+                const partNumDisplay = i + 1;
+                // For playback
+                const rbPlayback = document.createElement('input');
+                rbPlayback.type = 'radio';
+                rbPlayback.name = 'audio_part_playback';
+                rbPlayback.value = i;
+                rbPlayback.id = `part_playback_${i}`;
+                const lblPlayback = document.createElement('label');
+                lblPlayback.htmlFor = `part_playback_${i}`;
+                lblPlayback.textContent = `Part ${partNumDisplay}`;
+                playbackSelectorDiv.appendChild(rbPlayback);
+                playbackSelectorDiv.appendChild(lblPlayback);
+                if (i < pythonNumAudioParts -1) playbackSelectorDiv.appendChild(document.createTextNode(" ")); 
+
+                // For download
+                const rbDownload = document.createElement('input');
+                rbDownload.type = 'radio';
+                rbDownload.name = 'audio_part_download';
+                rbDownload.value = i;
+                rbDownload.id = `part_download_${i}`;
+                const lblDownload = document.createElement('label');
+                lblDownload.htmlFor = `part_download_${i}`;
+                lblDownload.textContent = `Part ${partNumDisplay}`;
+                downloadSelectorDiv.appendChild(rbDownload);
+                downloadSelectorDiv.appendChild(lblDownload);
+                 if (i < pythonNumAudioParts -1) downloadSelectorDiv.appendChild(document.createTextNode(" ")); 
+            }
+        }
+
+        // Server-side part loading
+        if (loadSelectedAudioPartButton) {
+            loadSelectedAudioPartButton.addEventListener('click', async () => {
+                if (!initAudioContextGlobally()) return;
+                const selectedPartInput = document.querySelector('#audio-part-selector-playback input[name="audio_part_playback"]:checked');
+                if (!selectedPartInput) { alert("Please select an audio part to load."); return; }
+                const partIndex = parseInt(selectedPartInput.value, 10);
+                
+                if(localAudioPartFileInput) localAudioPartFileInput.value = ""; // Clear local file selection
+                loadedAudioPartNameSpan.textContent = `Loading Part ${partIndex + 1} (Server)...`;
+                stopCurrentAudio();
+                audioBuffer = null; 
+
+                try {
+                    const response = await fetch(`/article/${articleId}/serve_mp3_part/${partIndex}`);
+                    if (!response.ok) throw new Error(`Failed to fetch audio part ${partIndex + 1}: ${response.statusText}`);
+                    const arrayBuffer = await response.arrayBuffer();
+                    audioBuffer = await audioContext.decodeAudioData(arrayBuffer); 
+                    loadedAudioPartNameSpan.textContent = `Loaded Part ${partIndex + 1} (Server)`;
+                    currentLoadedAudioPartIndex = partIndex;
+                    isAudiobookModeParts = true; 
+                    isAudiobookModeFull = false; 
+                    console.log(`JS: Loaded server audio part ${partIndex + 1}. Duration: ${audioBuffer.duration.toFixed(2)}s`);
+                } catch (e) {
+                    alert(`Error loading audio part ${partIndex + 1} from server: ${e.message}`);
+                    loadedAudioPartNameSpan.textContent = `Error loading Part ${partIndex + 1} (Server)`;
+                    audioBuffer = null;
+                    currentLoadedAudioPartIndex = -1;
+                }
+            });
+        }
+        
+        // Local part file loading button
+        if (loadLocalAudioPartButton) {
+            loadLocalAudioPartButton.addEventListener('click', () => {
+                if (!initAudioContextGlobally()) return;
+                const selectedPartInput = document.querySelector('#audio-part-selector-playback input[name="audio_part_playback"]:checked');
+                if (!selectedPartInput) {
+                    alert("Please select an audio part first (using the radio buttons).");
+                    return;
+                }
+                if (localAudioPartFileInput) localAudioPartFileInput.click(); 
+            });
+        }
+
+        // Handler for local file input
+        if (localAudioPartFileInput) {
+            localAudioPartFileInput.addEventListener('change', async function(event) {
+                if (!initAudioContextGlobally()) return;
+                const file = event.target.files[0];
+                if (!file) return;
+
+                const selectedPartInput = document.querySelector('#audio-part-selector-playback input[name="audio_part_playback"]:checked');
+                if (!selectedPartInput) { 
+                    alert("Error: No part selected. Please select a part using the radio buttons."); 
+                    localAudioPartFileInput.value = ""; // Reset
+                    return; 
+                } 
+                
+                const partIndex = parseInt(selectedPartInput.value, 10);
+
+                if (expectedChecksumsArray.length === 0 || partIndex >= expectedChecksumsArray.length) {
+                    alert(`Error: Expected checksum for part ${partIndex + 1} not found. Cannot verify local file.`);
+                    if(loadedAudioPartNameSpan) loadedAudioPartNameSpan.textContent = `Checksum missing for Part ${partIndex + 1}`;
+                    localAudioPartFileInput.value = ""; 
+                    return;
+                }
+                const expectedChecksum = expectedChecksumsArray[partIndex];
+
+                if (!expectedChecksum || expectedChecksum.trim() === "") {
+                    alert(`Warning: The expected checksum for Part ${partIndex + 1} is missing or empty. Cannot verify. Proceeding to load local file without verification.`);
+                    // No explicit return, will proceed to load. User is warned.
+                }
+
+                if(loadedAudioPartNameSpan) loadedAudioPartNameSpan.textContent = `Verifying Part ${partIndex + 1} (Local: ${file.name})...`;
+                stopCurrentAudio();
+                audioBuffer = null;
+
+                try {
+                    const fileBuffer = await file.arrayBuffer();
+                    const hashBuffer = await window.crypto.subtle.digest('SHA-256', fileBuffer);
+                    const calculatedHexChecksum = arrayBufferToHexString(hashBuffer);
+
+                    console.log(`JS: Part ${partIndex + 1} - Expected CS: ${expectedChecksum || "N/A"}, Calculated CS (local): ${calculatedHexChecksum}`);
+
+                    // Only perform strict check if expectedChecksum is present and non-empty
+                    if (expectedChecksum && expectedChecksum.trim() !== "" && calculatedHexChecksum.toLowerCase() !== expectedChecksum.toLowerCase()) {
+                        alert(`Checksum mismatch for Part ${partIndex + 1}.\nExpected: ...${expectedChecksum.slice(-10)}\nGot:      ...${calculatedHexChecksum.slice(-10)}\nPlease select the correct local file.`);
+                        if(loadedAudioPartNameSpan) loadedAudioPartNameSpan.textContent = `Incorrect file for Part ${partIndex + 1}`;
+                        currentLoadedAudioPartIndex = -1;
+                        localAudioPartFileInput.value = ""; 
+                        return;
+                    }
+                    
+                    audioBuffer = await audioContext.decodeAudioData(fileBuffer.slice(0)); 
+                    if(loadedAudioPartNameSpan) loadedAudioPartNameSpan.textContent = `Loaded Part ${partIndex + 1} (Local: ${file.name})`;
+                    currentLoadedAudioPartIndex = partIndex;
+                    isAudiobookModeParts = true;
+                    isAudiobookModeFull = false;
+                    console.log(`JS: Loaded local audio part ${partIndex + 1}. Duration: ${audioBuffer.duration.toFixed(2)}s`);
+
+                } catch (e) {
+                    alert(`Error processing local audio part ${partIndex + 1}: ${e.message}`);
+                    if(loadedAudioPartNameSpan) loadedAudioPartNameSpan.textContent = `Error loading local Part ${partIndex + 1}`;
+                    audioBuffer = null;
+                    currentLoadedAudioPartIndex = -1;
+                }
+                localAudioPartFileInput.value = ""; 
+            });
+        }
+
+
+        if (downloadSelectedAudioPartButton) {
+            downloadSelectedAudioPartButton.addEventListener('click', () => {
+                const selectedPartInput = document.querySelector('#audio-part-selector-download input[name="audio_part_download"]:checked');
+                if (!selectedPartInput) { alert("Please select an audio part to download."); return; }
+                const partIndex = selectedPartInput.value;
+                window.open(`/article/${articleId}/serve_mp3_part/${partIndex}?download=true`, '_blank'); 
+            });
+        }
+
+        const isIOS = /iPad|iPhone|iPod/.test(navigator.userAgent) && !window.MSStream;
+        if (isIOS && pythonNumAudioParts > 0) { 
+            console.log("JS: iOS detected and audio parts available, switching to parts view.");
+            isPartsViewActive = true;
+            updatePartsViewModeUI();
+        } else if (!isIOS && switchToPartsViewButton) { 
+             isPartsViewActive = false;
+             updatePartsViewModeUI();
+        }
+
+    } else { 
+        if (switchToPartsViewButton) switchToPartsViewButton.style.display = 'none';
+        if (switchToFullViewButton) switchToFullViewButton.style.display = 'none';
+        if (partsAudioViewControls) partsAudioViewControls.style.display = 'none';
+        if (partsAudioDownloadDiv) partsAudioDownloadDiv.style.display = 'none';
+        if (loadLocalAudioPartButton) loadLocalAudioPartButton.style.display = 'none';
     }
 });
 </script>

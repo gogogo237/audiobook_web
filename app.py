@@ -23,6 +23,8 @@ app.config['AENEAS_PYTHON_PATH'] = r"C:\Program Files\Python39\python.exe"
 app.config['PROCESSED_SRT_FOLDER'] = os.path.join(app.instance_path, 'processed_srts')
 app.config['TEMP_FILES_FOLDER'] = os.path.join(app.instance_path, 'temp_files')
 app.config['CONVERTED_AUDIO_FOLDER'] = os.path.join(app.instance_path, 'converted_audio')
+app.config['MP3_PARTS_FOLDER'] = os.path.join(app.instance_path, 'mp3_parts') # New folder for split MP3s
+app.config['MAX_AUDIO_PART_SIZE_MB'] = 20 # Max size for MP3 parts (iOS target)
 
 # --- Logging Configuration ---
 if not os.path.exists(app.instance_path):
@@ -65,6 +67,8 @@ def _ensure_dirs_exist():
         os.makedirs(app.config['TEMP_FILES_FOLDER'])
     if not os.path.exists(app.config['CONVERTED_AUDIO_FOLDER']):
         os.makedirs(app.config['CONVERTED_AUDIO_FOLDER'])
+    if not os.path.exists(app.config['MP3_PARTS_FOLDER']): # Ensure MP3 parts folder exists
+        os.makedirs(app.config['MP3_PARTS_FOLDER'])
 
 _ensure_dirs_exist()
 
@@ -173,11 +177,65 @@ def _process_audio_alignment(article_id,
             if bilingual_srt_generated_path_str:
                 db_manager.update_article_srt_path(article_id, bilingual_srt_generated_path_str)
                 app.logger.info(f"APP: Generated final bilingual SRT for article {article_id} at {bilingual_srt_generated_path_str}")
-                return bilingual_srt_generated_path_str
             else:
                 app.logger.warning(f"APP: Failed to generate final bilingual SRT for article {article_id}.")
                 flash("Failed to generate the final bilingual SRT file.", "warning")
                 return None
+
+            # --- MP3 Splitting Logic (after main processing) ---
+            if converted_mp3_path_str:
+                original_mp3_size_bytes = Path(converted_mp3_path_str).stat().st_size
+                max_size_bytes = app.config['MAX_AUDIO_PART_SIZE_MB'] * 1024 * 1024
+
+                if original_mp3_size_bytes > max_size_bytes:
+                    app.logger.info(f"APP: Original MP3 {converted_mp3_path_str} size {original_mp3_size_bytes} > {max_size_bytes}. Attempting to split for article {article_id}.")
+                    
+                    article_mp3_parts_dir_path = Path(app.config['MP3_PARTS_FOLDER']) / str(article_id)
+                    article_mp3_parts_dir_path.mkdir(parents=True, exist_ok=True)
+
+                    sentence_db_ids_ordered = db_manager.get_sentence_ids_for_article_in_order(article_id, app_logger=app.logger)
+
+                    if len(sentence_db_ids_ordered) != len(srt_timestamps):
+                        app.logger.error(f"APP: Mismatch: DB sentence count ({len(sentence_db_ids_ordered)}) vs SRT timestamp count ({len(srt_timestamps)}) for article {article_id}. Skipping MP3 splitting.")
+                    else:
+                        sentences_info_for_splitting = []
+                        for i, db_id_dict in enumerate(sentence_db_ids_ordered):
+                            sentences_info_for_splitting.append({
+                                'id': db_id_dict['id'], 
+                                'original_start_ms': srt_timestamps[i][0],
+                                'original_end_ms': srt_timestamps[i][1]
+                            })
+                        
+                        split_details = audio_processor.split_mp3_by_sentence_duration(
+                            original_mp3_path=converted_mp3_path_str,
+                            sentences_info=sentences_info_for_splitting,
+                            max_part_size_bytes=max_size_bytes,
+                            output_parts_dir=str(article_mp3_parts_dir_path),
+                            article_filename_base=article_filename_base, 
+                            logger=app.logger
+                        )
+
+                        if split_details and split_details['num_parts'] > 0:
+                            part_checksums_list = split_details.get('part_checksums', []) 
+                            db_manager.update_article_mp3_parts_info(
+                                article_id, 
+                                str(article_mp3_parts_dir_path), 
+                                split_details['num_parts'],
+                                part_checksums_list, 
+                                app_logger=app.logger
+                            )
+                            db_manager.batch_update_sentence_part_details(split_details['sentence_part_updates'], app_logger=app.logger)
+                            app.logger.info(f"APP: Successfully split MP3 for article {article_id} into {split_details['num_parts']} parts. Stored in {article_mp3_parts_dir_path}. Checksums {'processed' if part_checksums_list else 'not available'}.")
+                            flash(f"Audio processed. Original MP3 was large and split into {split_details['num_parts']} parts for compatibility.", "info")
+                        else:
+                            app.logger.warning(f"APP: MP3 splitting failed or resulted in no parts for article {article_id}. Clearing any previous part info.")
+                            db_manager.clear_article_mp3_parts_info(article_id, app_logger=app.logger) 
+                            flash("Audio processed. Original MP3 was large, but splitting failed or produced no parts.", "warning")
+                else: 
+                    app.logger.info(f"APP: Original MP3 {converted_mp3_path_str} size {original_mp3_size_bytes} <= {max_size_bytes}. No splitting needed. Clearing any previous part info for article {article_id}.")
+                    db_manager.clear_article_mp3_parts_info(article_id, app_logger=app.logger) 
+            
+            return bilingual_srt_generated_path_str 
     except Exception as e:
         app.logger.error(f"APP: Error during audio alignment for article {article_id}: {e}", exc_info=True)
         flash(f"An error occurred during audio processing: {str(e)}", "danger")
@@ -370,20 +428,20 @@ def align_audio_for_article(article_id):
 @app.route('/article/<int:article_id>')
 def view_article(article_id):
     app.logger.debug(f"APP: Attempting to view article ID: {article_id}")
-    article = db_manager.get_article_by_id(article_id)
-    if not article:
+    article_data = db_manager.get_article_by_id(article_id) 
+    if not article_data:
         flash('Article not found.', 'danger')
         app.logger.warning(f"APP: Article ID {article_id} not found for viewing.")
         return redirect(url_for('list_books_page'))
 
     book = None
-    if article['book_id']:
-        book = db_manager.get_book_by_id(article['book_id'])
-    if not book and article['book_id']: 
-        app.logger.warning(f"APP: Book ID {article['book_id']} for article {article_id} not found. Article might be orphaned.")
-        flash(f"Warning: The book associated with article '{article['filename']}' could not be found.", "warning")
+    if article_data['book_id']:
+        book = db_manager.get_book_by_id(article_data['book_id'])
+    if not book and article_data['book_id']: 
+        app.logger.warning(f"APP: Book ID {article_data['book_id']} for article {article_id} not found. Article might be orphaned.")
+        flash(f"Warning: The book associated with article '{article_data['filename']}' could not be found.", "warning")
 
-    article_filename = article['filename']
+    article_filename = article_data['filename']
     try:
         sentences_from_db = db_manager.get_sentences_for_article(article_id)
     except Exception as e:
@@ -409,10 +467,13 @@ def view_article(article_id):
             'start_time_ms': sentence_row['start_time_ms'],
             'end_time_ms': sentence_row['end_time_ms'],
             'paragraph_index': sentence_row['paragraph_index'], 
-            'sentence_index_in_paragraph': sentence_row['sentence_index_in_paragraph']
+            'sentence_index_in_paragraph': sentence_row['sentence_index_in_paragraph'],
+            'audio_part_index': sentence_row['audio_part_index'], 
+            'start_time_in_part_ms': sentence_row['start_time_in_part_ms'], 
+            'end_time_in_part_ms': sentence_row['end_time_in_part_ms'] 
         }
         current_paragraph_sentences.append(sentence_pair)
-
+        
         if sentence_row['start_time_ms'] is not None and sentence_row['end_time_ms'] is not None:
             has_timestamps = True
             
@@ -422,13 +483,23 @@ def view_article(article_id):
     reading_location_from_db = db_manager.get_reading_location(article_id, app_logger=app.logger)
     reading_location_for_template = dict(reading_location_from_db) if reading_location_from_db else None
 
+    article_audio_part_checksums_str = None
+    try:
+        article_audio_part_checksums_str = article_data['audio_part_checksums']
+    except KeyError: # Should not happen if column is selected, but as a fallback
+        app.logger.warning(f"APP: 'audio_part_checksums' key missing from article_data for article {article_id}. This might indicate a DB schema issue or an old record.")
+        article_audio_part_checksums_str = None
+    
     app.logger.debug(f"APP: Rendering article.html for ID {article_id}. `has_timestamps` is: {has_timestamps}. Reading location: {reading_location_for_template}")
+    app.logger.debug(f"APP: Article data for template: num_audio_parts={article_data['num_audio_parts']}, mp3_parts_folder_path='{article_data['mp3_parts_folder_path']}', audio_part_checksums='{str(article_audio_part_checksums_str)[:30] if article_audio_part_checksums_str else 'None'}...'")
+    
     return render_template('article.html',
-                           article=article,
+                           article=article_data, 
                            book=book, 
                            structured_article=structured_article_content,
                            has_timestamps=has_timestamps,
-                           reading_location=reading_location_for_template)
+                           reading_location=reading_location_for_template,
+                           article_audio_part_checksums=article_audio_part_checksums_str)
 
 
 @app.route('/article/<int:article_id>/save_location', methods=['POST'])
@@ -494,6 +565,32 @@ def download_mp3_for_article(article_id):
 
     app.logger.info(f"APP: Serving MP3 file: {filename} from dir: {directory} for article ID {article_id} as {download_name}")
     return send_from_directory(directory, filename, as_attachment=True, download_name=download_name)
+
+
+@app.route('/article/<int:article_id>/serve_mp3_part/<int:part_index>')
+def serve_mp3_part(article_id, part_index):
+    article = db_manager.get_article_by_id(article_id)
+    if not article or not article['mp3_parts_folder_path'] or article['num_audio_parts'] is None or part_index < 0 or part_index >= article['num_audio_parts']: 
+        app.logger.warning(f"APP: Serve MP3 part: Invalid request for article {article_id}, part {part_index}.")
+        return jsonify({'status': 'error', 'message': 'Audio part not found or invalid index.'}), 404
+
+    parts_folder = Path(article['mp3_parts_folder_path'])
+    article_filename_base = secure_filename(Path(article['filename']).stem)
+    part_filename = f"{article_filename_base}_part_{part_index}.mp3"
+    part_path = parts_folder / part_filename
+
+    if not part_path.is_file():
+        app.logger.error(f"APP: Serve MP3 part: File {part_path} not found for article {article_id}, part {part_index}.")
+        return jsonify({'status': 'error', 'message': 'Audio part file not found on server.'}), 404
+
+    app.logger.info(f"APP: Serving MP3 part: {part_filename} from dir: {parts_folder} for article ID {article_id}")
+    
+    should_download = request.args.get('download', 'false').lower() == 'true'
+    
+    download_name = f"{Path(article['filename']).stem}_part_{part_index + 1}.mp3" 
+
+    return send_from_directory(str(parts_folder.resolve()), part_filename, 
+                               as_attachment=should_download, download_name=download_name if should_download else None)
 
 
 if __name__ == '__main__':
