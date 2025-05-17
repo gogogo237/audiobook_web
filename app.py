@@ -600,4 +600,9 @@ if __name__ == '__main__':
        app.config['AENEAS_PYTHON_PATH'] = aeneas_path_env
     app.logger.info(f"AENEAS_PYTHON_PATH is set to: {app.config['AENEAS_PYTHON_PATH']}")
     
-    app.run(debug=True, host='0.0.0.0', port=5000)
+    # ORIGINAL LINE:
+    # app.run(debug=True, host='0.0.0.0', port=5000) 
+
+    # MODIFIED LINE FOR AD-HOC SSL:
+    app.run(debug=True, host='0.0.0.0', port=5000, ssl_context='adhoc')
+    app.logger.info("Flask app is now running with ad-hoc SSL (HTTPS).")
