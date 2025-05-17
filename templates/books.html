@@ -1,0 +1,40 @@
+<!-- bilingual_app/templates/books.html -->
+{% extends "base.html" %}
+
+{% block title %}Books{% endblock %}
+
+{% block content %}
+    <h1>My Books</h1>
+    
+    <h2>Add New Book</h2>
+    <form method="post" action="{{ url_for('list_books_page') }}">
+        <div>
+            <label for="title">Book Title:</label><br>
+            <input type="text" name="title" id="title" required size="50">
+        </div>
+        <br>
+        <input type="submit" value="Add Book">
+    </form>
+
+    <hr>
+
+    <h2>Available Books</h2>
+    {% if books %}
+        <ul>
+            {% for book in books %}
+                <li>
+                    <a href="{{ url_for('book_detail_page', book_id=book.id) }}">
+                        {{ book.title }}
+                    </a>
+                    {% if book.creation_timestamp %}
+                        (Created: {{ book.creation_timestamp.strftime('%Y-%m-%d %H:%M') }})
+                    {% else %}
+                        (Creation time unknown)
+                    {% endif %}
+                </li>
+            {% endfor %}
+        </ul>
+    {% else %}
+        <p>No books added yet. Add one above!</p>
+    {% endif %}
+{% endblock %}

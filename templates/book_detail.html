@@ -1,0 +1,53 @@
+<!-- bilingual_app/templates/book_detail.html -->
+{% extends "base.html" %}
+
+{% block title %}Book: {{ book.title }}{% endblock %}
+
+{% block content %}
+    <h1>Book: {{ book.title }}</h1>
+    <p><a href="{{ url_for('list_books_page') }}">« Back to All Books</a></p>
+
+    <hr>
+    <h2>Upload New Article to this Book</h2>
+    <p>Upload a .txt file with bilingual content. Optionally, upload a corresponding audio file (.mp3, .mp4, .wav, .m4a) for alignment.</p>
+    <form method="post" enctype="multipart/form-data" action="{{ url_for('book_detail_page', book_id=book.id) }}">
+        <div>
+            <label for="file">Text File (.txt):</label><br>
+            <input type="file" name="file" id="file" required accept=".txt">
+        </div>
+        <br>
+        <div>
+            <label for="audio_file">Audio File (Optional, for alignment):</label><br>
+            <input type="file" name="audio_file" id="audio_file" accept=".mp3,.mp4,.wav,.m4a">
+        </div>
+        <br>
+        <input type="submit" value="Upload and Process Article">
+    </form>
+
+    <hr>
+
+    <h2>Articles in "{{ book.title }}"</h2>
+    {% if articles %}
+        <ul>
+            {% for article_item in articles %} {# Changed loop var to avoid conflict #}
+                <li>
+                    <a href="{{ url_for('view_article', article_id=article_item.id) }}">
+                        {{ article_item.filename }}
+                    </a>
+                    {% if article_item.upload_timestamp %}
+                        (Uploaded: {{ article_item.upload_timestamp.strftime('%Y-%m-%d %H:%M') }})
+                    {% else %}
+                        (Upload time unknown)
+                    {% endif %}
+                    {% if article_item.processed_srt_path %}
+                        <span style="color: green;">(Audio Aligned)</span>
+                    {% else %}
+                        <a href="{{ url_for('align_audio_for_article', article_id=article_item.id) }}" style="font-size: 0.9em;">Align Audio</a>
+                    {% endif %}
+                </li>
+            {% endfor %}
+        </ul>
+    {% else %}
+        <p>No articles uploaded to this book yet. Add one above!</p>
+    {% endif %}
+{% endblock %}

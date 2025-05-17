@@ -56,6 +56,12 @@
 
 
 {% block content %}
+    {% if book %}
+    <p><a href="{{ url_for('book_detail_page', book_id=book.id) }}">« Back to Book: {{ book.title }}</a></p>
+    {% else %}
+    <p><a href="{{ url_for('list_books_page') }}">« Back to Books List (Book info missing for this article)</a></p>
+    {% endif %}
+
     <h1>{{ article.filename }}</h1>
 
     <div id="python-debug-info" style="display:none;">
@@ -113,8 +119,8 @@
 {% block footer_actions %}
     <div class="action-buttons-footer">
         <div class="action-buttons-footer-inner-content">
-            <a href="{{ url_for('index') }}" class="footer-icon-button" title="Back to Home">
-                <span class="icon">🏠</span>
+            <a href="{{ url_for('list_books_page') }}" class="footer-icon-button" title="Back to Books List">
+                <span class="icon">📚</span> {# Changed icon #}
             </a>
             <button id="showTranslationFooterButton" class="footer-icon-button" title="Show Translation for Highlighted Sentence (Tap/Click)">
                 <span class="icon">💬</span>
@@ -133,7 +139,6 @@ document.addEventListener('DOMContentLoaded', function() {
         const debugInfoElement = document.getElementById('python-debug-info');
         if (debugInfoElement) {
             const textContent = debugInfoElement.textContent;
-            // Simple parsing, assuming structure `Python name: value Python name2: value2`
             const parts = textContent.split('Python ');
             parts.forEach(part => {
                 if (part.startsWith('`has_timestamps`:')) {
@@ -154,24 +159,21 @@ document.addEventListener('DOMContentLoaded', function() {
     
     const articleContentWrapper = document.getElementById('article-content-wrapper');
     const popup = document.getElementById('translation-popup');
-    let highlightedSentence = null;     // For non-audiobook mode sentence selection
+    let highlightedSentence = null;
     let currentPopupTargetSentence = null; 
     const showTranslationFooterButton = document.getElementById('showTranslationFooterButton');
 
-    // --- Web Audio API Variables ---
     let audioContext = null;
     let audioBuffer = null;
-    let currentSourceNode = null;       // Tracks the currently playing Web Audio Node
+    let currentSourceNode = null;
     let isAudiobookMode = false;
-    let currentPlayingSentence = null;  // Tracks the sentence element corresponding to currentSourceNode
-                                        // This will also serve as the "sticky" highlighted sentence in audiobook mode
+    let currentPlayingSentence = null;
     let maxSentenceEndTime = 0; 
 
     const toggleAudiobookModeButton = document.getElementById('toggleAudiobookMode');
     const localAudioFileInput = document.getElementById('localAudioFile');
     const audioFileNameSpan = document.getElementById('audioFileName');
     const audiobookHint = document.getElementById('audiobookHint');
-
 
     function displayPopup(targetElement, content, isErrorMessage = false) {
         popup.innerHTML = content;
@@ -219,9 +221,6 @@ document.addEventListener('DOMContentLoaded', function() {
 
     if (articleContentWrapper) {
         articleContentWrapper.addEventListener('contextmenu', function(event) {
-            // Allow context menu for translation even in audiobook mode,
-            // but it will operate on 'highlightedSentence' (non-audiobook selection)
-            // or the sentence right-clicked if no 'highlightedSentence' exists.
             const targetSentence = event.target.closest('.english-sentence');
             if (targetSentence) {
                 event.preventDefault();
@@ -232,7 +231,6 @@ document.addEventListener('DOMContentLoaded', function() {
                 } else {
                     displayPopup(targetSentence, "No translation available for this sentence.", true);
                 }
-                // Update highlightedSentence for non-audiobook mode logic if needed
                 if (!isAudiobookMode) {
                     if (highlightedSentence) highlightedSentence.classList.remove('highlighted-sentence');
                     targetSentence.classList.add('highlighted-sentence');
@@ -247,7 +245,6 @@ document.addEventListener('DOMContentLoaded', function() {
         });
 
         articleContentWrapper.addEventListener('click', function(event) {
-            // General click outside to hide popup
             if (popup.style.display === 'block' && !popup.contains(event.target) && 
                 !event.target.closest('.english-sentence') && !event.target.closest('.footer-icon-button')) {
                 popup.style.display = 'none';
@@ -257,13 +254,11 @@ document.addEventListener('DOMContentLoaded', function() {
             const targetSentence = event.target.closest('.english-sentence');
             if (targetSentence) {
                 if (isAudiobookMode && audioContext && audioBuffer) { 
-                    playSentenceAudio(targetSentence); // Handles its own highlighting via 'playing-sentence'
+                    playSentenceAudio(targetSentence);
                 } else if (isAudiobookMode && (!audioContext || !audioBuffer)) {
                     alert("Audio not loaded or ready. Please select an audio file.");
                 } else { 
-                    // Non-audiobook mode: toggle 'highlighted-sentence' for translation focus
                     if (highlightedSentence === targetSentence) {
-                        // Clicked already highlighted sentence: deselect it
                         targetSentence.classList.remove('highlighted-sentence');
                         highlightedSentence = null;
                         if (popup.style.display === 'block' && currentPopupTargetSentence === targetSentence) {
@@ -271,13 +266,11 @@ document.addEventListener('DOMContentLoaded', function() {
                             currentPopupTargetSentence = null;
                         }
                     } else { 
-                        // Clicked a new sentence: deselect old, select new
                         if (highlightedSentence) {
                             highlightedSentence.classList.remove('highlighted-sentence');
                         }
                         targetSentence.classList.add('highlighted-sentence');
                         highlightedSentence = targetSentence;
-                        // If popup was for a different sentence, hide it
                         if (popup.style.display === 'block' && currentPopupTargetSentence !== targetSentence) {
                              popup.style.display = 'none';
                              currentPopupTargetSentence = null;
@@ -285,13 +278,10 @@ document.addEventListener('DOMContentLoaded', function() {
                     }
                 }
             } else { 
-                // Clicked outside any sentence
                 if (!isAudiobookMode && highlightedSentence) { 
-                    // In non-audiobook mode, deselect sentence if clicked outside
                     highlightedSentence.classList.remove('highlighted-sentence');
                     highlightedSentence = null;
                 }
-                // Hide popup if click is outside relevant elements
                 if (popup.style.display === 'block' && !popup.contains(event.target) && !event.target.closest('.footer-icon-button')) {
                     popup.style.display = 'none';
                     currentPopupTargetSentence = null;
@@ -304,9 +294,6 @@ document.addEventListener('DOMContentLoaded', function() {
         showTranslationFooterButton.addEventListener('click', function(event) {
             event.stopPropagation(); 
             
-            // Determine which sentence to show translation for:
-            // In audiobook mode, prefer 'currentPlayingSentence' if it exists (the one that's blue).
-            // Otherwise, use 'highlightedSentence' (the one selected by click in non-audiobook mode).
             let sentenceToTranslate = null;
             if (isAudiobookMode && currentPlayingSentence) {
                 sentenceToTranslate = currentPlayingSentence;
@@ -391,16 +378,15 @@ document.addEventListener('DOMContentLoaded', function() {
                 toggleAudiobookModeButton.textContent = 'Disable Audiobook Mode';
                 localAudioFileInput.style.display = 'inline-block';
                 audiobookHint.style.display = 'block';
-                // Remove non-audiobook highlight if any
                 if (highlightedSentence) {
                     highlightedSentence.classList.remove('highlighted-sentence');
                     highlightedSentence = null;
                 }
-                if (popup.style.display === 'block') { // Hide popup when entering audiobook mode
+                if (popup.style.display === 'block') {
                     popup.style.display = 'none';
                     currentPopupTargetSentence = null;
                 }
-            } else { // Disabling audiobook mode
+            } else { 
                 toggleAudiobookModeButton.textContent = 'Enable Audiobook Mode';
                 localAudioFileInput.style.display = 'none';
                 audiobookHint.style.display = 'none';
@@ -412,7 +398,6 @@ document.addEventListener('DOMContentLoaded', function() {
                     } catch(e) { console.warn("JS: Error stopping source on mode disable", e); }
                     currentSourceNode = null;
                 }
-                // Clear 'playing-sentence' highlight when disabling mode
                 if (currentPlayingSentence) {
                     currentPlayingSentence.classList.remove('playing-sentence');
                     currentPlayingSentence = null;
@@ -436,7 +421,7 @@ document.addEventListener('DOMContentLoaded', function() {
                     } catch(e) { /* ignore */ }
                     currentSourceNode = null;
                 }
-                if (currentPlayingSentence) { // Clear highlight of previously playing sentence if loading new file
+                if (currentPlayingSentence) {
                     currentPlayingSentence.classList.remove('playing-sentence');
                     currentPlayingSentence = null;
                 }
@@ -476,13 +461,11 @@ document.addEventListener('DOMContentLoaded', function() {
             if (!audioBuffer) { alert("Please load an audio file."); return; }
             if (!isAudiobookMode) { console.warn("JS: Not in audiobook mode for playback."); return; }
 
-            if (currentSourceNode) { // Stop previous sound and clear its 'onended'
+            if (currentSourceNode) {
                 try {
                     currentSourceNode.onended = null; currentSourceNode.stop(); currentSourceNode.disconnect();
                 } catch (e) { /* ignore */ }
             }
-            // If there was a 'currentPlayingSentence' (blue highlight), remove it ONLY IF it's not the one we are about to play.
-            // This ensures clicking the same sentence again correctly restarts it and maintains highlight.
             if (currentPlayingSentence && currentPlayingSentence !== sentenceElement) {
                 currentPlayingSentence.classList.remove('playing-sentence');
             }
@@ -503,12 +486,11 @@ document.addEventListener('DOMContentLoaded', function() {
             }
             if (durationInSeconds <= 0) { 
                 console.warn(`JS (Web Audio): Corrected duration to minimal if non-positive: ${durationInSeconds}s.`);
-                durationInSeconds = 0.05; // Play a very short sound or handle as error
+                durationInSeconds = 0.05; 
             }
             const clampedDuration = Math.min(durationInSeconds, audioBuffer.duration - offsetInSeconds);
 
-            // Set new currentPlayingSentence and apply highlight
-            currentPlayingSentence = sentenceElement; // This is the one that will remain highlighted
+            currentPlayingSentence = sentenceElement;
             currentPlayingSentence.classList.add('playing-sentence');
 
             currentSourceNode = audioContext.createBufferSource();
@@ -527,11 +509,7 @@ document.addEventListener('DOMContentLoaded', function() {
             }
             
             currentSourceNode.onended = () => {
-                // IMPORTANT: When a sentence finishes, we DO NOT remove the 'playing-sentence' class here.
-                // It should remain highlighted. It will be removed if another sentence is played,
-                // or if audiobook mode is disabled, or if a new file is loaded.
                 console.log(`JS (Web Audio): Playback ended (onended) for: ${sentenceElement.textContent.substring(0,30)}. Highlight remains.`);
-                // No need to set currentPlayingSentence to null here, as we want it to remember the last played/highlighted.
             };
         } 
     } else {

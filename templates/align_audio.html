@@ -5,6 +5,9 @@
 
 {% block content %}
     <h1>Align Audio for: {{ article_filename }}</h1>
+    {% if book %}
+    <p><em>Part of Book: <a href="{{ url_for('book_detail_page', book_id=book.id) }}">{{ book.title }}</a></em></p>
+    {% endif %}
     <p>Upload an audio file (.mp3, .mp4, .wav, .m4a) to align with the text of this article.</p>
     <form method="post" enctype="multipart/form-data">
         <div>
@@ -15,6 +18,9 @@
         <input type="submit" value="Upload and Align Audio">
     </form>
     <hr>
-    <p><a href="{{ url_for('view_article', article_id=article_id) }}">Back to Article</a></p>
-    <p><a href="{{ url_for('index') }}">Back to Home</a></p>
+    <p><a href="{{ url_for('view_article', article_id=article_id) }}">Back to Article: {{ article_filename }}</a></p>
+    {% if book %}
+    <p><a href="{{ url_for('book_detail_page', book_id=book.id) }}">Back to Book: {{ book.title }}</a></p>
+    {% endif %}
+    <p><a href="{{ url_for('list_books_page') }}">Back to Books List</a></p>
 {% endblock %}

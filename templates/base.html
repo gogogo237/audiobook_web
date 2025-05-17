@@ -10,7 +10,7 @@
 </head>
 <body>
     <nav>
-        <a href="{{ url_for('index') }}">Home</a>
+        <a href="{{ url_for('list_books_page') }}">Books Home</a>
     </nav>
     <div class="container">
         {% with messages = get_flashed_messages(with_categories=true) %}
