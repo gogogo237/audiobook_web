@@ -14,6 +14,7 @@ from pydub.exceptions import CouldntEncodeError, CouldntDecodeError
 import soundfile # For saving WAVs from TTS numpy arrays
 
 import text_parser # Assuming this is in the same directory or PYTHONPATH
+from werkzeug.utils import secure_filename # <--- ADDED THIS IMPORT
 import tts_utils # For TTS generation
 import db_manager # For updating DB
 
@@ -359,20 +360,48 @@ def process_article_with_tts(article_id, raw_bilingual_text_content_string,
                              article_filename_base, app_instance): # app_instance for config and logger
     logger = app_instance.logger
     app_config = app_instance.config
-    logger.info(f"AUDIO_PROC: Starting TTS processing for article ID {article_id} ('{article_filename_base}')")
 
-    # Result dictionary to pass back status and messages
-    result = {
+    # --- Path Generation for Converted Audio, MP3 Parts, and SRT ---
+    article_data_for_paths = db_manager.get_article_by_id(article_id, app_logger=logger)
+    result = {} # Initialize result dict early for error returns
+    if not article_data_for_paths or not article_data_for_paths['book_id']:
+        msg = f"TTS Error: Cannot determine book for article {article_id} to create descriptive audio/SRT paths."
+        logger.error(f"AUDIO_PROC: {msg}")
+        result.update({"message": msg, "message_category": "danger", "success": False})
+        return result
+    book_data_for_paths = db_manager.get_book_by_id(article_data_for_paths['book_id'], app_logger=logger)
+    if not book_data_for_paths:
+        msg = f"TTS Error: Book data not found for book_id {article_data_for_paths['book_id']} (article {article_id})."
+        logger.error(f"AUDIO_PROC: {msg}")
+        result.update({"message": msg, "message_category": "danger", "success": False})
+        return result
+
+    book_safe_title = secure_filename(book_data_for_paths['title']) if book_data_for_paths['title'] else "unknown_book"
+    # article_filename_base is already the secure stem of the original text file
+    article_safe_title = article_filename_base if article_filename_base else secure_filename(article_data_for_paths['filename'])
+    if not book_safe_title.strip(): book_safe_title = "unknown_book_fallback"
+    if not article_safe_title.strip(): article_safe_title = "unknown_article_fallback"
+
+    base_converted_audio_dir_for_article = Path(app_config['CONVERTED_AUDIO_FOLDER']) / book_safe_title / article_safe_title
+    base_mp3_parts_dir_for_article = Path(app_config['MP3_PARTS_FOLDER']) / book_safe_title / article_safe_title
+    base_srt_dir_for_article = Path(app_config['PROCESSED_SRT_FOLDER']) / book_safe_title / article_safe_title # <-- NEW FOR SRT
+    # --- End Path Generation ---
+
+    logger.info(f"AUDIO_PROC: Starting TTS processing for article ID {article_id} ('{article_safe_title}')")
+
+    result.update({
         "success": False,
         "message": "TTS processing initiated.",
         "message_category": "info",
         "processed_path": None
-    }
+    })
 
-    processed_srt_dir_base = Path(app_config['PROCESSED_SRT_FOLDER'])
-    temp_tts_clips_dir_obj = None # For cleanup in finally block
+    # processed_srt_dir_base is not directly used now, base_srt_dir_for_article is.
+    # processed_srt_dir_base = Path(app_config['PROCESSED_SRT_FOLDER']) # Keep for context if needed elsewhere, but we use specific path now.
+    temp_tts_clips_dir_obj = None 
 
     try:
+        # ... (TTS engine checks, sentence parsing, audio generation loop - no changes here) ...
         if not tts_utils.is_initialized_en or not tts_utils.is_initialized_zh:
             msg = "TTS Error: Engines not ready."
             logger.error(f"AUDIO_PROC: {msg} Aborting TTS processing.")
@@ -407,7 +436,7 @@ def process_article_with_tts(article_id, raw_bilingual_text_content_string,
         sentence_audio_details = []
         
         with tempfile.TemporaryDirectory(dir=str(app_config['TEMP_FILES_FOLDER']), prefix=f"tts_clips_{article_id}_") as temp_tts_clips_dir:
-            temp_tts_clips_dir_obj = Path(temp_tts_clips_dir) # For potential access outside with, though not strictly needed here
+            temp_tts_clips_dir_obj = Path(temp_tts_clips_dir) 
             logger.info(f"AUDIO_PROC: Created temporary directory for TTS clips: {temp_tts_clips_dir_obj}")
 
             for idx, (p_idx, s_idx_in_p, en_text, zh_text) in enumerate(parsed_sentences):
@@ -449,10 +478,9 @@ def process_article_with_tts(article_id, raw_bilingual_text_content_string,
             for detail in sentence_audio_details:
                 full_audio_segment += detail['pydub_segment_with_silence']
 
-            article_converted_audio_dir = Path(app_config['CONVERTED_AUDIO_FOLDER']) / str(article_id)
-            article_converted_audio_dir.mkdir(parents=True, exist_ok=True)
-            final_mp3_filename = f"{article_filename_base}_tts_combined.mp3"
-            converted_mp3_path_str = str(article_converted_audio_dir / final_mp3_filename)
+            base_converted_audio_dir_for_article.mkdir(parents=True, exist_ok=True)
+            final_mp3_filename = f"{article_safe_title}_tts_combined.mp3" # Use article_safe_title
+            converted_mp3_path_str = str(base_converted_audio_dir_for_article / final_mp3_filename)
 
             try:
                 full_audio_segment.export(converted_mp3_path_str, format="mp3", parameters=["-q:a", "2"])
@@ -464,7 +492,7 @@ def process_article_with_tts(article_id, raw_bilingual_text_content_string,
                 result.update({"message": msg, "message_category": "danger"})
                 return result
             
-            result["processed_path"] = converted_mp3_path_str # Mark path for return
+            result["processed_path"] = converted_mp3_path_str 
 
             logger.info(f"AUDIO_PROC: Calculating timestamps for TTS audio of article {article_id}...")
             srt_timestamps = []
@@ -481,7 +509,6 @@ def process_article_with_tts(article_id, raw_bilingual_text_content_string,
             if updated_count != len(parsed_sentences):
                  logger.warning(f"AUDIO_PROC: Mismatch in updated timestamps ({updated_count}) vs parsed sentences ({len(parsed_sentences)}) for article {article_id}.")
             
-            # Message for timestamp update - will be part of the final success message
             timestamp_message = f"Generated audio with TTS and updated {updated_count} sentence timestamps."
 
             full_sentences_data_from_db = db_manager.get_sentences_for_article(article_id, app_logger=logger)
@@ -489,10 +516,10 @@ def process_article_with_tts(article_id, raw_bilingual_text_content_string,
                 {'english_text': s['english_text'], 'chinese_text': s['chinese_text']}
                 for s in full_sentences_data_from_db
             ]
-            final_bilingual_srt_filename = f"{article_filename_base}_bilingual_tts.srt"
-            article_srt_dir = processed_srt_dir_base / str(article_id)
-            article_srt_dir.mkdir(parents=True, exist_ok=True)
-            final_bilingual_srt_path = article_srt_dir / final_bilingual_srt_filename
+            final_bilingual_srt_filename = f"{article_safe_title}_bilingual_tts.srt" # Use article_safe_title
+            # Use the new descriptive base directory for SRT
+            base_srt_dir_for_article.mkdir(parents=True, exist_ok=True)
+            final_bilingual_srt_path = base_srt_dir_for_article / final_bilingual_srt_filename
 
             bilingual_srt_generated_path_str = generate_bilingual_srt(
                 article_id, bilingual_sentences_for_srt_gen, srt_timestamps,
@@ -503,12 +530,10 @@ def process_article_with_tts(article_id, raw_bilingual_text_content_string,
                 logger.info(f"AUDIO_PROC: Generated final bilingual SRT for article {article_id} at {bilingual_srt_generated_path_str} (TTS)")
             else:
                 logger.warning(f"AUDIO_PROC: Failed to generate final bilingual SRT for article {article_id} (TTS).")
-                # Update message slightly if SRT fails but audio is fine
                 timestamp_message += " SRT generation failed."
 
 
-            # --- MP3 Splitting (Using the new size-based estimation logic) ---
-            # (This part is complex and needs its own error handling that might modify `result`)
+            # --- MP3 Splitting ---
             splitting_message_part = ""
             if converted_mp3_path_str:
                 logger.info(f"AUDIO_PROC: Proceeding to MP3 splitting for TTS-generated audio, article {article_id}")
@@ -526,8 +551,7 @@ def process_article_with_tts(article_id, raw_bilingual_text_content_string,
                             'original_end_ms': srt_timestamps[i][1]
                         })
                     
-                    article_mp3_parts_dir_path = Path(app_config['MP3_PARTS_FOLDER']) / str(article_id)
-                    article_mp3_parts_dir_path.mkdir(parents=True, exist_ok=True)
+                    base_mp3_parts_dir_for_article.mkdir(parents=True, exist_ok=True)
                     max_size_bytes = app_config['MAX_AUDIO_PART_SIZE_MB'] * 1024 * 1024
                     original_mp3_size_bytes = Path(converted_mp3_path_str).stat().st_size
 
@@ -537,14 +561,14 @@ def process_article_with_tts(article_id, raw_bilingual_text_content_string,
                             original_mp3_path=converted_mp3_path_str,
                             sentences_info=sentences_info_for_splitting,
                             max_part_size_bytes=max_size_bytes,
-                            output_parts_dir=str(article_mp3_parts_dir_path),
-                            article_filename_base=article_filename_base,
+                            output_parts_dir=str(base_mp3_parts_dir_for_article),
+                            article_filename_base=article_safe_title, # Use article_safe_title
                             logger=logger
                         )
                         if split_details and split_details['num_parts'] > 0:
                             part_checksums_list = split_details.get('part_checksums', [])
                             db_manager.update_article_mp3_parts_info(
-                                article_id, str(article_mp3_parts_dir_path), split_details['num_parts'],
+                                article_id, str(base_mp3_parts_dir_for_article), split_details['num_parts'], 
                                 part_checksums_list, app_logger=logger
                             )
                             db_manager.batch_update_sentence_part_details(split_details['sentence_part_updates'], app_logger=logger)
@@ -572,10 +596,8 @@ def process_article_with_tts(article_id, raw_bilingual_text_content_string,
         logger.error(f"AUDIO_PROC: Major error during TTS processing for article {article_id}: {e}\n{traceback.format_exc()}", exc_info=True)
         result.update({"message": msg, "message_category": "danger", "success": False})
         return result
-    # finally: # temp_tts_clips_dir_obj is cleaned by 'with' statement
-    #     logger.info(f"AUDIO_PROC: TTS processing function finished for article {article_id}.")
 
-    return result # Should be unreachable if all paths return, but as a fallback
+    return result
 
 
 # --- NEW MP3 Splitting Function (by size estimation) ---
@@ -746,9 +768,3 @@ def split_mp3_by_size_estimation(original_mp3_path, sentences_info,
         'sentence_part_updates': sentence_part_updates,
         'part_checksums': part_checksums
     }
-
-
-# Old split_mp3_by_sentence_duration (can be removed or kept for Aeneas if you prefer separate logic there)
-# For now, I'll comment it out as the new one should be used by both paths if desired.
-# def split_mp3_by_sentence_duration(...):
-#    ...

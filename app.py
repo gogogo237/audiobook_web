@@ -108,6 +108,31 @@ def _process_audio_alignment(article_id,
     processed_srt_dir_base = Path(app.config['PROCESSED_SRT_FOLDER'])
     
     try:
+        # --- Path Generation for Converted Audio and MP3 Parts ---
+        article_data_for_paths = db_manager.get_article_by_id(article_id, app_logger=app.logger)
+        if not article_data_for_paths or not article_data_for_paths['book_id']:
+            app.logger.error(f"APP: _process_audio_alignment: Cannot determine book for article {article_id} to create descriptive audio/SRT paths.")
+            flash("Error: Could not find book information for this article. Cannot create descriptive audio/SRT paths.", "danger")
+            return None
+        book_data_for_paths = db_manager.get_book_by_id(article_data_for_paths['book_id'], app_logger=app.logger)
+        if not book_data_for_paths:
+            app.logger.error(f"APP: _process_audio_alignment: Book data not found for book_id {article_data_for_paths['book_id']} (article {article_id}).")
+            flash(f"Error: Book (ID: {article_data_for_paths['book_id']}) not found. Cannot create descriptive audio/SRT paths.", "danger")
+            return None
+
+        book_safe_title = secure_filename(book_data_for_paths['title']) if book_data_for_paths['title'] else "unknown_book"
+        # article_filename_base is already the secure stem of the original text file
+        article_safe_title = article_filename_base if article_filename_base else secure_filename(article_data_for_paths['filename'])
+        if not book_safe_title.strip(): book_safe_title = "unknown_book_fallback"
+        if not article_safe_title.strip(): article_safe_title = "unknown_article_fallback"
+
+
+        # Define base directories using descriptive names
+        base_converted_audio_dir_for_article = Path(app.config['CONVERTED_AUDIO_FOLDER']) / book_safe_title / article_safe_title
+        base_mp3_parts_dir_for_article = Path(app.config['MP3_PARTS_FOLDER']) / book_safe_title / article_safe_title
+        base_srt_dir_for_article = Path(app.config['PROCESSED_SRT_FOLDER']) / book_safe_title / article_safe_title # <-- NEW FOR SRT
+        # --- End Path Generation ---
+
         with tempfile.TemporaryDirectory(dir=str(temp_dir_base), prefix=f"aeneas_job_{article_id}_") as job_temp_dir:
             job_temp_dir_path = Path(job_temp_dir)
             app.logger.info(f"APP: Created temporary job directory: {job_temp_dir_path} for article {article_id}")
@@ -117,14 +142,13 @@ def _process_audio_alignment(article_id,
             audio_file_storage.save(str(original_audio_temp_path))
             app.logger.info(f"APP: Saved uploaded audio to {original_audio_temp_path} for article {article_id}")
 
-            app.logger.info(f"APP: Converting '{original_audio_temp_path}' to MP3 format for persistent storage (article {article_id}).")
-            article_converted_audio_dir = Path(app.config['CONVERTED_AUDIO_FOLDER']) / str(article_id)
-            article_converted_audio_dir.mkdir(parents=True, exist_ok=True)
-            app.logger.info(f"APP: Persistent directory for converted audio for article {article_id}: {article_converted_audio_dir}")
+            # Use the new descriptive base directory for converted audio
+            base_converted_audio_dir_for_article.mkdir(parents=True, exist_ok=True)
+            app.logger.info(f"APP: Converting '{original_audio_temp_path}' to MP3. Persistent directory for converted audio for article {article_id}: {base_converted_audio_dir_for_article}")
 
             converted_mp3_path_str = audio_processor.convert_to_mp3(
                 str(original_audio_temp_path),
-                str(article_converted_audio_dir),
+                str(base_converted_audio_dir_for_article), # Pass the full descriptive path
                 logger=app.logger
             )
             app.logger.info(f"APP: Converted audio stored persistently at: {converted_mp3_path_str} for article {article_id}")
@@ -148,7 +172,7 @@ def _process_audio_alignment(article_id,
             else:
                 app.logger.info(f"APP: Using {len(english_sentences_list_for_aeneas)} English sentences for Aeneas for article {article_id}.")
 
-            plain_text_filename = f"{article_filename_base}_eng_for_aeneas.txt"
+            plain_text_filename = f"{article_safe_title}_eng_for_aeneas.txt" # Use article_safe_title
             plain_text_temp_path = job_temp_dir_path / plain_text_filename
             audio_processor.create_plain_text_file_from_list(
                 english_sentences_list_for_aeneas,
@@ -157,7 +181,7 @@ def _process_audio_alignment(article_id,
             )
             app.logger.info(f"APP: Created plain English text file at {plain_text_temp_path} for article {article_id}")
 
-            aeneas_srt_filename = f"{article_filename_base}_aeneas_raw.srt"
+            aeneas_srt_filename = f"{article_safe_title}_aeneas_raw.srt" # Use article_safe_title
             aeneas_srt_temp_path = job_temp_dir_path / aeneas_srt_filename
             app.logger.info(f"APP: Running Aeneas for article {article_id} (MP3: {converted_mp3_path_str}, Text: {plain_text_temp_path}). Output to: {aeneas_srt_temp_path}")
             audio_processor.run_aeneas_alignment(
@@ -190,10 +214,10 @@ def _process_audio_alignment(article_id,
                 {'english_text': s['english_text'], 'chinese_text': s['chinese_text']}
                 for s in full_sentences_data_from_db
             ]
-            final_bilingual_srt_filename = f"{article_filename_base}_bilingual_aeneas.srt" # Clarify source
-            article_srt_dir = processed_srt_dir_base / str(article_id)
-            article_srt_dir.mkdir(parents=True, exist_ok=True)
-            final_bilingual_srt_path = article_srt_dir / final_bilingual_srt_filename
+            final_bilingual_srt_filename = f"{article_safe_title}_bilingual_aeneas.srt" # Use article_safe_title
+            # Use the new descriptive base directory for SRT
+            base_srt_dir_for_article.mkdir(parents=True, exist_ok=True)
+            final_bilingual_srt_path = base_srt_dir_for_article / final_bilingual_srt_filename
             
             bilingual_srt_generated_path_str = audio_processor.generate_bilingual_srt(
                 article_id,
@@ -213,10 +237,6 @@ def _process_audio_alignment(article_id,
             # --- MP3 Splitting Logic (after Aeneas main processing) ---
             if converted_mp3_path_str:
                 app.logger.info(f"APP: Proceeding to MP3 splitting for Aeneas-processed audio, article {article_id}")
-                # Using the new splitting logic for consistency, though the old one could also be used here.
-                # For this, we need sentence IDs and their timestamps (which we just got from Aeneas and put in DB).
-                
-                # Fetch sentence IDs in order
                 sentence_db_ids_ordered = db_manager.get_sentence_ids_for_article_in_order(article_id, app_logger=app.logger)
 
                 if len(sentence_db_ids_ordered) != len(srt_timestamps):
@@ -230,15 +250,14 @@ def _process_audio_alignment(article_id,
                             'original_end_ms': srt_timestamps[i][1]
                         })
                     
-                    article_mp3_parts_dir_path = Path(app.config['MP3_PARTS_FOLDER']) / str(article_id)
-                    article_mp3_parts_dir_path.mkdir(parents=True, exist_ok=True)
+                    base_mp3_parts_dir_for_article.mkdir(parents=True, exist_ok=True)
 
                     split_details = audio_processor.split_mp3_by_size_estimation(
                         original_mp3_path=converted_mp3_path_str,
                         sentences_info=sentences_info_for_splitting,
                         max_part_size_bytes=app.config['MAX_AUDIO_PART_SIZE_MB'] * 1024 * 1024,
-                        output_parts_dir=str(article_mp3_parts_dir_path),
-                        article_filename_base=article_filename_base,
+                        output_parts_dir=str(base_mp3_parts_dir_for_article),
+                        article_filename_base=article_safe_title, # Use article_safe_title
                         logger=app.logger
                     )
 
@@ -246,19 +265,19 @@ def _process_audio_alignment(article_id,
                         part_checksums_list = split_details.get('part_checksums', [])
                         db_manager.update_article_mp3_parts_info(
                             article_id,
-                            str(article_mp3_parts_dir_path),
+                            str(base_mp3_parts_dir_for_article),
                             split_details['num_parts'],
                             part_checksums_list,
                             app_logger=app.logger
                         )
                         db_manager.batch_update_sentence_part_details(split_details['sentence_part_updates'], app_logger=app.logger)
-                        app.logger.info(f"APP: Successfully split Aeneas MP3 for article {article_id} into {split_details['num_parts']} parts. Stored in {article_mp3_parts_dir_path}.")
+                        app.logger.info(f"APP: Successfully split Aeneas MP3 for article {article_id} into {split_details['num_parts']} parts. Stored in {base_mp3_parts_dir_for_article}.")
                         flash(f"Audio processed (Aeneas). Original MP3 was large and split into {split_details['num_parts']} parts.", "info")
                     elif split_details and split_details['num_parts'] == 0 and Path(converted_mp3_path_str).stat().st_size > (app.config['MAX_AUDIO_PART_SIZE_MB'] * 1024 * 1024):
                         app.logger.warning(f"APP: Aeneas MP3 splitting failed or resulted in no parts for article {article_id}, despite being large.")
                         db_manager.clear_article_mp3_parts_info(article_id, app_logger=app.logger)
                         flash("Audio processed (Aeneas). Original MP3 was large, but splitting failed or produced no parts.", "warning")
-                    else: # Not large enough to split or other case
+                    else: 
                         app.logger.info(f"APP: Aeneas MP3 for article {article_id} not split (either too small or splitting not applicable). Clearing previous part info.")
                         db_manager.clear_article_mp3_parts_info(article_id, app_logger=app.logger)
             
