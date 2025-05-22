@@ -3,20 +3,51 @@
 
 {% block title %}Align Audio for {{ article_filename }}{% endblock %}
 
+{% block head_extra %} {# NEW block for JavaScript #}
+<script>
+    function toggleAudioUpload(checkbox) {
+        const audioFileInput = document.getElementById('audio_file');
+        if (audioFileInput) {
+            audioFileInput.disabled = checkbox.checked;
+            if (checkbox.checked) {
+                audioFileInput.value = ''; // Clear selection if TTS is chosen
+            }
+        }
+    }
+</script>
+{% endblock %}
+
+
 {% block content %}
     <h1>Align Audio for: {{ article_filename }}</h1>
     {% if book %}
     <p><em>Part of Book: <a href="{{ url_for('book_detail_page', book_id=book.id) }}">{{ book.title }}</a></em></p>
     {% endif %}
-    <p>Upload an audio file (.mp3, .mp4, .wav, .m4a) to align with the text of this article.</p>
+    
     <form method="post" enctype="multipart/form-data">
         <div>
-            <label for="audio_file">Audio File:</label><br>
-            <input type="file" name="audio_file" id="audio_file" required accept=".mp3,.mp4,.wav,.m4a">
+            {# --- NEW TTS Checkbox --- #}
+            <input type="checkbox" name="use_tts" id="use_tts_checkbox" value="true" onchange="toggleAudioUpload(this)">
+            <label for="use_tts_checkbox">Generate audio using Text-to-Speech</label>
+            <p style="font-size:0.8em; margin-left:20px;">(If checked, the audio file selection below will be ignored and audio will be synthesized using existing text.)</p>
         </div>
         <br>
-        <input type="submit" value="Upload and Align Audio">
+        <div>
+            <label for="audio_file">Audio File (for Aeneas alignment if TTS is not used):</label><br>
+            <input type="file" name="audio_file" id="audio_file" accept=".mp3,.mp4,.wav,.m4a"> {# Removed 'required' initially, server validates #}
+        </div>
+        <br>
+        <input type="submit" value="Process Audio">
     </form>
+    <script>
+        // Initial state check for the audio file input based on checkbox state
+        document.addEventListener('DOMContentLoaded', function() {
+            const ttsCheckbox = document.getElementById('use_tts_checkbox');
+            if (ttsCheckbox) {
+                 toggleAudioUpload(ttsCheckbox);
+            }
+        });
+    </script>
     <hr>
     <p><a href="{{ url_for('view_article', article_id=article_id) }}">Back to Article: {{ article_filename }}</a></p>
     {% if book %}

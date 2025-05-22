@@ -403,30 +403,26 @@ def book_detail_page(book_id):
         if article_id_processed and sentences_added_count > 0:
             if use_tts_checked:
                 app.logger.info(f"APP: TTS checkbox is checked. Processing audio using TTS for article ID {article_id_processed}.")
-                # Pass the app instance (self) to audio_processor for config and logger
                 tts_result = audio_processor.process_article_with_tts(
-                    article_id_processed,
-                    raw_bilingual_text_content,
-                    article_safe_stem_for_files,
-                    app # Passing the Flask app instance
+                    article_id=article_id_processed,
+                    article_filename_base=article_safe_stem_for_files,
+                    app_instance=app,
+                    raw_bilingual_text_content_string=raw_bilingual_text_content
                 )
                 if tts_result and tts_result.get("message"):
                     flash(tts_result["message"], tts_result.get("message_category", "info"))
-                # No explicit redirect here, success/failure handled by flash from tts_result
 
-            elif 'audio_file' in request.files: # TTS not checked, process uploaded audio file
+            elif 'audio_file' in request.files: 
                 audio_file = request.files['audio_file']
                 if audio_file and audio_file.filename != '':
                     if allowed_audio_file(audio_file.filename):
-                        # ... (existing Aeneas call logic) ...
                         app.logger.info(f"APP: Processing Aeneas audio alignment for article ID {article_id_processed}...")
-                        aeneas_srt_path = _process_audio_alignment(
+                        _process_audio_alignment( # Renamed from aeneas_srt_path = _process_audio_alignment
                             article_id_processed,
                             audio_file,
                             raw_bilingual_text_content,
                             article_safe_stem_for_files
                         )
-                        # _process_audio_alignment already flashes messages
                     else:
                         flash(f'Invalid audio file type: "{audio_file.filename}". Supported: {ALLOWED_AUDIO_EXTENSIONS}', 'warning')
                         app.logger.warning(f"APP: Invalid audio file type uploaded for book {book_id}: {audio_file.filename}")
@@ -438,7 +434,6 @@ def book_detail_page(book_id):
                 app.logger.info(f"APP: Article {article_id_processed} text processed. No audio file and TTS not selected.")
         elif article_id_processed and sentences_added_count == 0:
             app.logger.info(f"APP: No sentences were added for article {article_id_processed}. Skipping audio processing stage.")
-            # Flash message for no sentences already handled.
         
         return redirect(url_for('book_detail_page', book_id=book_id))
 
@@ -459,27 +454,6 @@ def book_detail_page(book_id):
                            articles=articles_for_book,
                            currently_reading_article_id=currently_reading_article_id)
 
-    # GET request (no change to this part of the function)
-    articles_for_book = []
-    currently_reading_article_id = None
-    try:
-        articles_for_book = db_manager.get_articles_for_book(book_id)
-        most_recent_location = db_manager.get_most_recent_reading_location_for_book(book_id, app_logger=app.logger)
-        if most_recent_location:
-            currently_reading_article_id = most_recent_location['article_id']
-            app.logger.info(f"APP: For book {book_id}, currently reading article ID is {currently_reading_article_id}")
-    except Exception as e:
-        app.logger.error(f"APP: Error fetching articles or reading location for book ID {book_id}: {e}", exc_info=True)
-        flash(f"Could not retrieve articles or reading status for book '{book['title']}'.", "danger")
-        
-    return render_template('book_detail.html',
-                           book=book,
-                           articles=articles_for_book,
-                           currently_reading_article_id=currently_reading_article_id)
-
-# ... (rest of app.py: align_audio_for_article, view_article, save_reading_location, download_mp3_for_article, serve_mp3_part) ...
-# The deferred align_audio_for_article route might also need a TTS checkbox if you want that option there too.
-# For now, it will remain Aeneas-only.
 
 @app.route('/article/<int:article_id>/align_audio', methods=['GET', 'POST'])
 def align_audio_for_article(article_id):
@@ -491,39 +465,63 @@ def align_audio_for_article(article_id):
     
     book = db_manager.get_book_by_id(article['book_id']) if article['book_id'] else None
     
-    article_title_from_db = article['filename'] # This is the user-facing title (stem of original txt)
+    article_title_from_db = article['filename'] 
     article_safe_stem_for_files = secure_filename(article_title_from_db)
     
     if request.method == 'POST':
-        if 'audio_file' not in request.files:
-            flash('No audio file part.', 'danger')
-            return redirect(url_for('align_audio_for_article', article_id=article_id))
-        audio_file = request.files['audio_file']
-        if audio_file.filename == '':
-            flash('No audio file selected.', 'danger')
-            return redirect(url_for('align_audio_for_article', article_id=article_id))
+        use_tts_checked = request.form.get('use_tts') == 'true'
+        app.logger.info(f"APP: align_audio_for_article (POST) for article {article_id} ('{article_title_from_db}'). TTS checkbox: {use_tts_checked}")
 
-        if audio_file and allowed_audio_file(audio_file.filename):
-            app.logger.info(f"APP: Processing deferred AENEAS audio alignment for article ID {article_id} ('{article_title_from_db}'). English sentences will be fetched from DB.")
-            # For deferred alignment, we pass None for original_bilingual_text_content_string
-            # _process_audio_alignment will fetch sentences from DB.
-            _process_audio_alignment(
-                article_id,
-                audio_file,
-                None, # No raw text string needed, will pull from DB
-                article_safe_stem_for_files
+        if use_tts_checked:
+            app.logger.info(f"APP: Processing TTS for deferred alignment for article ID {article_id} ('{article_title_from_db}'). Sentences will be fetched from DB.")
+            
+            # Sentences will be fetched from DB by process_article_with_tts
+            # as raw_bilingual_text_content_string and parsed_sentences_list are None
+            tts_result = audio_processor.process_article_with_tts(
+                article_id=article_id,
+                article_filename_base=article_safe_stem_for_files,
+                app_instance=app,
+                raw_bilingual_text_content_string=None, 
+                parsed_sentences_list=None 
             )
+            if tts_result and tts_result.get("message"):
+                flash(tts_result["message"], tts_result.get("message_category", "info"))
+            
             return redirect(url_for('view_article', article_id=article_id))
-        else:
-            flash(f'Invalid audio file type: "{audio_file.filename}". Supported: {ALLOWED_AUDIO_EXTENSIONS}', 'warning')
-            app.logger.warning(f"APP: Invalid audio file type for deferred Aeneas alignment: {audio_file.filename}")
-        return redirect(url_for('align_audio_for_article', article_id=article_id))
+        
+        # Else (TTS not checked), proceed with Aeneas audio file upload
+        else: 
+            if 'audio_file' not in request.files:
+                flash('No audio file part (and "Use TTS" was not selected).', 'danger')
+                return redirect(url_for('align_audio_for_article', article_id=article_id))
+            
+            audio_file = request.files['audio_file']
+            if audio_file.filename == '':
+                flash('No audio file selected (and "Use TTS" was not selected).', 'danger')
+                return redirect(url_for('align_audio_for_article', article_id=article_id))
+
+            if audio_file and allowed_audio_file(audio_file.filename):
+                app.logger.info(f"APP: Processing deferred AENEAS audio alignment for article ID {article_id} ('{article_title_from_db}'). English sentences will be fetched from DB.")
+                _process_audio_alignment(
+                    article_id,
+                    audio_file,
+                    None, 
+                    article_safe_stem_for_files
+                )
+                # _process_audio_alignment already flashes messages
+                return redirect(url_for('view_article', article_id=article_id))
+            else:
+                flash(f'Invalid audio file type: "{audio_file.filename}". Supported: {ALLOWED_AUDIO_EXTENSIONS}', 'warning')
+                app.logger.warning(f"APP: Invalid audio file type for deferred Aeneas alignment: {audio_file.filename}")
+            
+            # Fallback redirect if invalid audio file type or other issues before Aeneas call
+            return redirect(url_for('align_audio_for_article', article_id=article_id))
 
     # GET request
     return render_template('align_audio.html', article_id=article_id, article_filename=article_title_from_db, book=book)
 
 
-# ... (view_article, save_reading_location, download_mp3_for_article, serve_mp3_part remain unchanged for now)
+# ... (view_article, save_reading_location, download_mp3_for_article, serve_mp3_part remain unchanged)
 
 @app.route('/article/<int:article_id>')
 def view_article(article_id):

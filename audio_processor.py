@@ -355,15 +355,15 @@ def get_audio_duration_ms(audio_path_str, logger=None):
         if logger: logger.error("AUDIO_PROC: ffprobe not found. Cannot get audio duration.")
         raise Exception("ffprobe not found. Please ensure FFmpeg (which includes ffprobe) is installed and in PATH.")
 
-
-def process_article_with_tts(article_id, raw_bilingual_text_content_string,
-                             article_filename_base, app_instance): # app_instance for config and logger
+def process_article_with_tts(article_id,
+                             article_filename_base, app_instance,
+                             raw_bilingual_text_content_string=None, parsed_sentences_list=None):
     logger = app_instance.logger
     app_config = app_instance.config
 
     # --- Path Generation for Converted Audio, MP3 Parts, and SRT ---
     article_data_for_paths = db_manager.get_article_by_id(article_id, app_logger=logger)
-    result = {} # Initialize result dict early for error returns
+    result = {} 
     if not article_data_for_paths or not article_data_for_paths['book_id']:
         msg = f"TTS Error: Cannot determine book for article {article_id} to create descriptive audio/SRT paths."
         logger.error(f"AUDIO_PROC: {msg}")
@@ -377,14 +377,13 @@ def process_article_with_tts(article_id, raw_bilingual_text_content_string,
         return result
 
     book_safe_title = secure_filename(book_data_for_paths['title']) if book_data_for_paths['title'] else "unknown_book"
-    # article_filename_base is already the secure stem of the original text file
     article_safe_title = article_filename_base if article_filename_base else secure_filename(article_data_for_paths['filename'])
     if not book_safe_title.strip(): book_safe_title = "unknown_book_fallback"
     if not article_safe_title.strip(): article_safe_title = "unknown_article_fallback"
 
     base_converted_audio_dir_for_article = Path(app_config['CONVERTED_AUDIO_FOLDER']) / book_safe_title / article_safe_title
     base_mp3_parts_dir_for_article = Path(app_config['MP3_PARTS_FOLDER']) / book_safe_title / article_safe_title
-    base_srt_dir_for_article = Path(app_config['PROCESSED_SRT_FOLDER']) / book_safe_title / article_safe_title # <-- NEW FOR SRT
+    base_srt_dir_for_article = Path(app_config['PROCESSED_SRT_FOLDER']) / book_safe_title / article_safe_title
     # --- End Path Generation ---
 
     logger.info(f"AUDIO_PROC: Starting TTS processing for article ID {article_id} ('{article_safe_title}')")
@@ -396,12 +395,9 @@ def process_article_with_tts(article_id, raw_bilingual_text_content_string,
         "processed_path": None
     })
 
-    # processed_srt_dir_base is not directly used now, base_srt_dir_for_article is.
-    # processed_srt_dir_base = Path(app_config['PROCESSED_SRT_FOLDER']) # Keep for context if needed elsewhere, but we use specific path now.
     temp_tts_clips_dir_obj = None 
 
     try:
-        # ... (TTS engine checks, sentence parsing, audio generation loop - no changes here) ...
         if not tts_utils.is_initialized_en or not tts_utils.is_initialized_zh:
             msg = "TTS Error: Engines not ready."
             logger.error(f"AUDIO_PROC: {msg} Aborting TTS processing.")
@@ -426,12 +422,51 @@ def process_article_with_tts(article_id, raw_bilingual_text_content_string,
             result.update({"message": msg, "message_category": "danger"})
             return result
 
-        parsed_sentences = list(text_parser.parse_bilingual_file_content(raw_bilingual_text_content_string))
-        if not parsed_sentences:
-            msg = "No sentences found in text to process with TTS."
+        # --- Get parsed sentences ---
+        _parsed_sentences_for_tts = []
+        if parsed_sentences_list:
+            if isinstance(parsed_sentences_list, list) and \
+               len(parsed_sentences_list) > 0 and \
+               (isinstance(parsed_sentences_list[0], dict) or hasattr(parsed_sentences_list[0], 'keys')):
+                for s_dict in parsed_sentences_list: 
+                    _parsed_sentences_for_tts.append((
+                        s_dict['paragraph_index'],
+                        s_dict['sentence_index_in_paragraph'],
+                        s_dict['english_text'],
+                        s_dict['chinese_text']
+                    ))
+                logger.info(f"AUDIO_PROC: TTS using pre-parsed sentences list ({len(_parsed_sentences_for_tts)} items) from DB.")
+            else: 
+                _parsed_sentences_for_tts = parsed_sentences_list
+                logger.info(f"AUDIO_PROC: TTS using provided parsed_sentences_list in assumed tuple format ({len(_parsed_sentences_for_tts)} items).")
+        
+        elif raw_bilingual_text_content_string:
+            _parsed_sentences_for_tts = list(text_parser.parse_bilingual_file_content(raw_bilingual_text_content_string))
+            logger.info(f"AUDIO_PROC: TTS using raw text string, parsed into ({len(_parsed_sentences_for_tts)} items).")
+        else: # Neither raw_bilingual_text_content_string nor parsed_sentences_list is provided; fetch from DB.
+            logger.info(f"AUDIO_PROC: TTS for article {article_id} - no raw text or pre-parsed list. Fetching sentences from DB.")
+            sentences_from_db = db_manager.get_sentences_for_article(article_id, app_logger=logger)
+            if not sentences_from_db:
+                msg = f"TTS Error: No sentences found in DB for article {article_id}."
+                logger.error(f"AUDIO_PROC: {msg}")
+                result.update({"message": msg, "message_category": "danger"})
+                return result
+            
+            for s_dict in sentences_from_db: # s_dict is a Row from sqlite, which is dict-like
+                _parsed_sentences_for_tts.append((
+                    s_dict['paragraph_index'],
+                    s_dict['sentence_index_in_paragraph'],
+                    s_dict['english_text'],
+                    s_dict['chinese_text']
+                ))
+            logger.info(f"AUDIO_PROC: TTS using sentences fetched from DB ({len(_parsed_sentences_for_tts)} items) for article {article_id}.")
+        
+        if not _parsed_sentences_for_tts: # Check after potential parsing/conversion/DB fetch
+            msg = "No sentences available (from text, parsed list, or DB) to process with TTS."
             logger.warning(f"AUDIO_PROC: {msg} for article {article_id}. Aborting TTS.")
             result.update({"message": msg, "message_category": "warning"})
             return result
+        # --- END Get parsed sentences ---
 
         sentence_audio_details = []
         
@@ -439,8 +474,8 @@ def process_article_with_tts(article_id, raw_bilingual_text_content_string,
             temp_tts_clips_dir_obj = Path(temp_tts_clips_dir) 
             logger.info(f"AUDIO_PROC: Created temporary directory for TTS clips: {temp_tts_clips_dir_obj}")
 
-            for idx, (p_idx, s_idx_in_p, en_text, zh_text) in enumerate(parsed_sentences):
-                logger.info(f"AUDIO_PROC: TTS processing sentence {idx + 1}/{len(parsed_sentences)}: '{en_text[:30]}...'")
+            for idx, (p_idx, s_idx_in_p, en_text, zh_text) in enumerate(_parsed_sentences_for_tts):
+                logger.info(f"AUDIO_PROC: TTS processing sentence {idx + 1}/{len(_parsed_sentences_for_tts)}: '{en_text[:30]}...' (P:{p_idx}, S:{s_idx_in_p})")
                 try:
                     eng_audio_data_np = tts_utils.generate_audio(
                         pipeline_en, en_text, app_config['KOKORO_ENGLISH_VOICE'], logger=logger
@@ -479,7 +514,7 @@ def process_article_with_tts(article_id, raw_bilingual_text_content_string,
                 full_audio_segment += detail['pydub_segment_with_silence']
 
             base_converted_audio_dir_for_article.mkdir(parents=True, exist_ok=True)
-            final_mp3_filename = f"{article_safe_title}_tts_combined.mp3" # Use article_safe_title
+            final_mp3_filename = f"{article_safe_title}_tts_combined.mp3"
             converted_mp3_path_str = str(base_converted_audio_dir_for_article / final_mp3_filename)
 
             try:
@@ -506,23 +541,23 @@ def process_article_with_tts(article_id, raw_bilingual_text_content_string,
             
             updated_count = db_manager.update_sentence_timestamps(article_id, srt_timestamps, app_logger=logger)
             logger.info(f"AUDIO_PROC: Updated {updated_count} sentence timestamps in DB for TTS audio of article {article_id}.")
-            if updated_count != len(parsed_sentences):
-                 logger.warning(f"AUDIO_PROC: Mismatch in updated timestamps ({updated_count}) vs parsed sentences ({len(parsed_sentences)}) for article {article_id}.")
+            if updated_count != len(_parsed_sentences_for_tts):
+                 logger.warning(f"AUDIO_PROC: Mismatch in updated timestamps ({updated_count}) vs parsed sentences ({len(_parsed_sentences_for_tts)}) for article {article_id}.")
             
             timestamp_message = f"Generated audio with TTS and updated {updated_count} sentence timestamps."
 
-            full_sentences_data_from_db = db_manager.get_sentences_for_article(article_id, app_logger=logger)
-            bilingual_sentences_for_srt_gen = [
-                {'english_text': s['english_text'], 'chinese_text': s['chinese_text']}
-                for s in full_sentences_data_from_db
+            # Use _parsed_sentences_for_tts for generating bilingual SRT as it's already in the correct format
+            # and reflects what was actually sent to TTS.
+            bilingual_sentences_for_srt_gen_tts = [
+                {'english_text': s_tuple[2], 'chinese_text': s_tuple[3]} # s_tuple is (p_idx, s_idx, en, zh)
+                for s_tuple in _parsed_sentences_for_tts
             ]
-            final_bilingual_srt_filename = f"{article_safe_title}_bilingual_tts.srt" # Use article_safe_title
-            # Use the new descriptive base directory for SRT
+            final_bilingual_srt_filename = f"{article_safe_title}_bilingual_tts.srt"
             base_srt_dir_for_article.mkdir(parents=True, exist_ok=True)
             final_bilingual_srt_path = base_srt_dir_for_article / final_bilingual_srt_filename
 
             bilingual_srt_generated_path_str = generate_bilingual_srt(
-                article_id, bilingual_sentences_for_srt_gen, srt_timestamps,
+                article_id, bilingual_sentences_for_srt_gen_tts, srt_timestamps,
                 str(final_bilingual_srt_path), logger=logger
             )
             if bilingual_srt_generated_path_str:
@@ -562,7 +597,7 @@ def process_article_with_tts(article_id, raw_bilingual_text_content_string,
                             sentences_info=sentences_info_for_splitting,
                             max_part_size_bytes=max_size_bytes,
                             output_parts_dir=str(base_mp3_parts_dir_for_article),
-                            article_filename_base=article_safe_title, # Use article_safe_title
+                            article_filename_base=article_safe_title,
                             logger=logger
                         )
                         if split_details and split_details['num_parts'] > 0:
@@ -599,7 +634,6 @@ def process_article_with_tts(article_id, raw_bilingual_text_content_string,
 
     return result
 
-
 # --- NEW MP3 Splitting Function (by size estimation) ---
 def split_mp3_by_size_estimation(original_mp3_path, sentences_info,
                                  max_part_size_bytes, output_parts_dir,
@@ -635,7 +669,7 @@ def split_mp3_by_size_estimation(original_mp3_path, sentences_info,
 
     if total_mp3_size_bytes <= max_part_size_bytes:
         logger.info(f"AUDIO_PROC_SPLIT: MP3 size {total_mp3_size_bytes}B <= max part size {max_part_size_bytes}B. No splitting needed.")
-        return {'num_parts': 0, 'sentence_part_updates': [], 'part_checksums': []} # Indicates no splitting done
+        return {'num_parts': 0, 'sentence_part_updates': [], 'part_checksums': []} 
 
     sentence_part_updates = []
     current_part_idx = 0
@@ -646,64 +680,49 @@ def split_mp3_by_size_estimation(original_mp3_path, sentences_info,
     while sentence_cursor < len(sentences_info):
         part_start_original_ms = sentences_info[sentence_cursor]['original_start_ms']
         current_part_accumulated_size_bytes = 0
-        current_part_sentences_info = [] # Sentences for this specific part
+        current_part_sentences_info = [] 
         part_end_original_ms_for_ffmpeg = part_start_original_ms
 
-        # Inner loop to gather sentences for the current part
-        temp_sentence_cursor = sentence_cursor # Use a temp cursor for lookahead
+        temp_sentence_cursor = sentence_cursor 
         while temp_sentence_cursor < len(sentences_info):
             sentence = sentences_info[temp_sentence_cursor]
             sentence_duration_ms = sentence['original_end_ms'] - sentence['original_start_ms']
-            if sentence_duration_ms <= 0: # Handle zero or negative duration sentences
-                 # Estimate a very small size, or a fixed small duration like 50ms for size calc
-                 # This prevents division by zero if total_mp3_duration_ms is also very small
-                 # and avoids over-weighting these in size calc if many exist
-                 estimated_sentence_size_bytes = (50 / total_mp3_duration_ms) * total_mp3_size_bytes if total_mp3_duration_ms > 0 else 1024 # small default
+            if sentence_duration_ms <= 0: 
+                 estimated_sentence_size_bytes = (50 / total_mp3_duration_ms) * total_mp3_size_bytes if total_mp3_duration_ms > 0 else 1024 
             else:
                  estimated_sentence_size_bytes = (sentence_duration_ms / total_mp3_duration_ms) * total_mp3_size_bytes
             
-            # Ensure estimated_sentence_size_bytes is not zero if sentence_duration_ms is positive
             if sentence_duration_ms > 0 and estimated_sentence_size_bytes == 0:
-                estimated_sentence_size_bytes = 1024 # Minimum arbitrary size to ensure progress
+                estimated_sentence_size_bytes = 1024 
 
             if (current_part_accumulated_size_bytes + estimated_sentence_size_bytes <= max_part_size_bytes) or \
-               (len(current_part_sentences_info) == 0): # Always include at least one sentence
+               (len(current_part_sentences_info) == 0): 
                 
                 current_part_sentences_info.append(sentence)
                 current_part_accumulated_size_bytes += estimated_sentence_size_bytes
-                part_end_original_ms_for_ffmpeg = sentence['original_end_ms'] # Update actual end time
+                part_end_original_ms_for_ffmpeg = sentence['original_end_ms'] 
                 temp_sentence_cursor += 1
             else:
-                break # This sentence will start the next part
+                break 
 
         if not current_part_sentences_info:
             logger.warning("AUDIO_PROC_SPLIT: No sentences collected for a part, breaking split loop.")
-            break # Should not happen if logic is correct
-
-        # Update main sentence_cursor after processing this part's sentences
+            break 
+        
         sentence_cursor = temp_sentence_cursor
 
-        # Extract the Part using FFmpeg
         part_output_filename = f"{article_filename_base}_part_{current_part_idx}.mp3"
         part_output_path = output_parts_dir_obj / part_output_filename
 
-        ffmpeg_start_sec = max(0, part_start_original_ms / 1000.0) # Ensure non-negative
+        ffmpeg_start_sec = max(0, part_start_original_ms / 1000.0) 
         ffmpeg_end_sec = part_end_original_ms_for_ffmpeg / 1000.0
         
-        # Ensure duration is positive for ffmpeg
         if ffmpeg_end_sec <= ffmpeg_start_sec:
             logger.warning(f"AUDIO_PROC_SPLIT: Calculated zero or negative duration for part {current_part_idx} "
                            f"(start: {ffmpeg_start_sec:.3f}s, to: {ffmpeg_end_sec:.3f}s). Skipping this part extraction.")
-            # This part is skipped, so don't increment current_part_idx yet,
-            # and the sentences that would have been in it will be re-evaluated for the next part.
-            # However, this might lead to an infinite loop if sentences always result in zero duration parts.
-            # A better approach for zero-duration segments: assign them to the *previous* or *next* valid part,
-            # or give them a minimal nominal duration for ffmpeg.
-            # For now, we'll log and skip, but this needs careful thought if it occurs often.
-            # If sentence_cursor didn't advance, this is an issue.
-            if temp_sentence_cursor == sentence_cursor and sentence_cursor < len(sentences_info): # No progress
+            if temp_sentence_cursor == sentence_cursor and sentence_cursor < len(sentences_info): 
                 logger.error("AUDIO_PROC_SPLIT: Potential infinite loop due to zero-duration part calculation. Advancing sentence cursor by 1 to break.")
-                sentence_cursor += 1 # Force progress
+                sentence_cursor += 1 
             continue
 
 
@@ -712,7 +731,7 @@ def split_mp3_by_size_estimation(original_mp3_path, sentences_info,
             "-i", str(original_mp3_path_obj),
             "-ss", str(ffmpeg_start_sec),
             "-to", str(ffmpeg_end_sec),
-            "-c", "copy", # Stream copy for speed and quality
+            "-c", "copy", 
             str(part_output_path)
         ]
         cmd_display = " ".join([shlex.quote(c) for c in cmd_split])
@@ -738,33 +757,36 @@ def split_mp3_by_size_estimation(original_mp3_path, sentences_info,
             for sent_in_part in current_part_sentences_info:
                 sentence_part_updates.append({
                     'sentence_db_id': sent_in_part['id'],
-                    'audio_part_index': current_part_idx, # current_part_idx is the 0-based index of this successfully created part
+                    'audio_part_index': current_part_idx, 
                     'start_time_in_part_ms': sent_in_part['original_start_ms'] - part_start_original_ms,
                     'end_time_in_part_ms': sent_in_part['original_end_ms'] - part_start_original_ms,
                 })
-            current_part_idx += 1 # Increment only if part creation was attempted (successful or not, to keep filenames unique on retry)
-                                  # Actually, better to increment only on success of creation of file.
-                                  # The current_part_idx for filename should be num_parts_successfully_created
-                                  # But for DB audio_part_index, it should be the index of this specific part being made
+            current_part_idx += 1 
 
         except subprocess.CalledProcessError as e:
             logger.error(f"AUDIO_PROC_SPLIT: Failed to create part {current_part_idx} (cmd: {cmd_display}): {e.stderr.decode(errors='ignore') if e.stderr else e}")
-            part_checksums.append("") # Placeholder for failed part checksum
-            # Do not increment num_parts_successfully_created
-            # current_part_idx might increment to try a new filename next time if we want to retry, or not if we just skip
-            # For now, we just log failure and move on. The sentences that would have been in this part
-            # will be re-attempted in the next iteration if sentence_cursor was not fully advanced.
-            # This part is tricky: if a part fails, do those sentences get lost or retried?
-            # The current logic (sentence_cursor = temp_sentence_cursor) means they are considered processed.
-            # If ffmpeg fails for a segment, those sentences might be "lost" from parts.
-            # A more robust way would be to revert sentence_cursor if ffmpeg fails for a part.
-            # For now, let's assume ffmpeg success for simplicity of the core logic.
+            part_checksums.append("") 
+            # current_part_idx +=1 # Increment filename index even on failure to avoid overwrite if retried.
+                                 # Or, more robustly, delete the failed part if it was partially created.
+                                 # For now, we'll increment to keep filenames unique in case of retries,
+                                 # but num_parts_successfully_created will not increment.
 
     logger.info(f"AUDIO_PROC_SPLIT: Splitting complete. {num_parts_successfully_created} parts created. "
-                f"{len(sentence_part_updates)} sentence updates prepared. {len(part_checksums)} checksums recorded.")
+                f"{len(sentence_part_updates)} sentence updates prepared. {len(part_checksums)} checksums recorded (length reflects attempts).")
 
     return {
         'num_parts': num_parts_successfully_created,
         'sentence_part_updates': sentence_part_updates,
-        'part_checksums': part_checksums
+        'part_checksums': [cs for cs in part_checksums if cs] # Only return checksums for successfully created parts.
+                                                              # Or rather, match length with num_parts_successfully_created
+                                                              # The current logic will have len(part_checksums) == number of attempts.
+                                                              # Let's filter it based on success of creation.
+                                                              # A better way: only append to part_checksums on successful creation.
+                                                              # The current loop structure has `current_part_idx` as the index for next part.
+                                                              # Let's stick to `part_checksums` containing checksums for successfully created parts.
+                                                              # The simplest is to build `part_checksums` only on success.
+                                                              # The `part_checksums` currently has "" for failures.
+                                                              # Re-filter based on num_parts_successfully_created.
+                                                              # The number of successful parts might be less than `current_part_idx` if some failed.
+                                                              # For DB consistency, the list of checksums should match `num_parts_successfully_created`.
     }
