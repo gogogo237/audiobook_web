@@ -2,6 +2,20 @@
 
 {% block title %}Book: {{ book.title }}{% endblock %}
 
+{% block head_extra %} {# NEW block for JavaScript #}
+<script>
+    function toggleAudioUpload(checkbox) {
+        const audioFileInput = document.getElementById('audio_file');
+        if (audioFileInput) {
+            audioFileInput.disabled = checkbox.checked;
+            if (checkbox.checked) {
+                audioFileInput.value = ''; // Clear selection if TTS is chosen
+            }
+        }
+    }
+</script>
+{% endblock %}
+
 {% block content %}
     <h1>Book: {{ book.title }}</h1>
     <p><a href="{{ url_for('list_books_page') }}">« Back to All Books</a></p>
@@ -9,7 +23,7 @@
     <h2>Articles in "{{ book.title }}"</h2>
     {% if articles %}
         <ul>
-            {% for article_item in articles %} {# Changed loop var to avoid conflict #}
+            {% for article_item in articles %}
                 <li>
                     <a href="{{ url_for('view_article', article_id=article_item.id) }}">
                         {{ article_item.filename }}
@@ -19,10 +33,10 @@
                     {% else %}
                         (Upload time unknown)
                     {% endif %}
-                    {% if article_item.processed_srt_path %}
-                        <span style="color: green;">(Audio Aligned)</span>
+                    {% if article_item.processed_srt_path and article_item.converted_mp3_path %} {# Check both #}
+                        <span style="color: green;">(Audio Processed)</span>
                     {% else %}
-                        <a href="{{ url_for('align_audio_for_article', article_id=article_item.id) }}" style="font-size: 0.9em;">Align Audio</a>
+                        <a href="{{ url_for('align_audio_for_article', article_id=article_item.id) }}" style="font-size: 0.9em;">Align Uploaded Audio (Aeneas)</a>
                     {% endif %}
                     {% if currently_reading_article_id and article_item.id == currently_reading_article_id %}
                         <strong style="color: #28a745; margin-left: 5px;">(currently reading)</strong>
@@ -31,12 +45,12 @@
             {% endfor %}
         </ul>
     {% else %}
-        <p>No articles uploaded to this book yet. Add one above!</p>
+        <p>No articles uploaded to this book yet. Add one using the form below.</p>
     {% endif %}
 
     <hr>
     <h2>Upload New Article to this Book</h2>
-    <p>Upload a .txt file with bilingual content. Optionally, upload a corresponding audio file (.mp3, .mp4, .wav, .m4a) for alignment.</p>
+    <p>Upload a .txt file with bilingual content. Optionally, upload a corresponding audio file (.mp3, .mp4, .wav, .m4a) for alignment using Aeneas, OR choose to generate audio using Text-to-Speech.</p>
     <form method="post" enctype="multipart/form-data" action="{{ url_for('book_detail_page', book_id=book.id) }}">
         <div>
             <label for="file">Text File (.txt):</label><br>
@@ -44,7 +58,14 @@
         </div>
         <br>
         <div>
-            <label for="audio_file">Audio File (Optional, for alignment):</label><br>
+            {# --- NEW TTS Checkbox --- #}
+            <input type="checkbox" name="use_tts" id="use_tts_checkbox" value="true" onchange="toggleAudioUpload(this)">
+            <label for="use_tts_checkbox">Generate audio using Text-to-Speech</label>
+            <p style="font-size:0.8em; margin-left:20px;">(If checked, the audio file selection below will be ignored and audio will be synthesized.)</p>
+        </div>
+        <br>
+        <div>
+            <label for="audio_file">Audio File (for Aeneas alignment if TTS is not used):</label><br>
             <input type="file" name="audio_file" id="audio_file" accept=".mp3,.mp4,.wav,.m4a">
         </div>
         <br>

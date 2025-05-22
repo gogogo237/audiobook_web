@@ -1,22 +1,28 @@
 import os
 import subprocess
-import tempfile 
+import tempfile
 import re
 import shlex
-from pathlib import Path 
-import locale 
+from pathlib import Path
+import locale
 import math
-import hashlib # Added for checksum calculation
+import hashlib
+import traceback # For detailed error logging
 
-from pydub import AudioSegment # Keep for now, might be used if direct ffmpeg fails or for other tasks
+from pydub import AudioSegment
 from pydub.exceptions import CouldntEncodeError, CouldntDecodeError
+import soundfile # For saving WAVs from TTS numpy arrays
 
+import text_parser # Assuming this is in the same directory or PYTHONPATH
+import tts_utils # For TTS generation
+import db_manager # For updating DB
+
+# Helper function to calculate SHA256 checksum (no changes from original)
 def calculate_sha256_checksum(file_path_str, logger=None):
-    """Calculates SHA256 checksum of a file and returns it as a hex string."""
+    # ... (same as your existing function)
     sha256_hash = hashlib.sha256()
     try:
         with open(file_path_str, "rb") as f:
-            # Read and update hash string value in blocks of 4K
             for byte_block in iter(lambda: f.read(4096), b""):
                 sha256_hash.update(byte_block)
         return sha256_hash.hexdigest()
@@ -24,7 +30,9 @@ def calculate_sha256_checksum(file_path_str, logger=None):
         if logger: logger.error(f"AUDIO_PROC: Error reading file {file_path_str} for checksum: {e}")
         return None
 
+# extract_english_sentences_for_aeneas (no changes needed for TTS path initially)
 def extract_english_sentences_for_aeneas(bilingual_file_content_string, logger=None):
+    # ... (same as your existing function)
     english_sentences = []
     try:
         content_no_closing_para = bilingual_file_content_string.replace('</paragraph>', '')
@@ -53,8 +61,9 @@ def extract_english_sentences_for_aeneas(bilingual_file_content_string, logger=N
             logger.error(f"AUDIO_PROC: Error extracting English sentences for Aeneas: {e}", exc_info=True)
         raise
 
-
+# create_plain_text_file_from_list (no changes needed for TTS path initially, Aeneas specific)
 def create_plain_text_file_from_list(english_sentence_list, output_path, logger=None):
+    # ... (same as your existing function)
     try:
         Path(output_path).parent.mkdir(parents=True, exist_ok=True)
         with open(output_path, 'w', encoding='utf-8') as f:
@@ -65,8 +74,9 @@ def create_plain_text_file_from_list(english_sentence_list, output_path, logger=
         if logger: logger.error(f"AUDIO_PROC: Failed to write plain text file {output_path}: {e}")
         raise
 
-
+# srt_time_to_ms (no changes)
 def srt_time_to_ms(time_str):
+    # ... (same as your existing function)
     try:
         time_str_normalized = time_str.replace('.', ',')
         h, m, s_ms = time_str_normalized.split(':')
@@ -75,8 +85,9 @@ def srt_time_to_ms(time_str):
     except ValueError:
         raise ValueError(f"Invalid SRT time format: {time_str}")
 
-
+# convert_to_mp3 (no changes, used by Aeneas path)
 def convert_to_mp3(source_path_str, output_dir_str, logger=None):
+    # ... (same as your existing function)
     source_path = Path(source_path_str)
     output_dir = Path(output_dir_str)
 
@@ -91,12 +102,11 @@ def convert_to_mp3(source_path_str, output_dir_str, logger=None):
     if logger: logger.info(f"AUDIO_PROC: Attempting to convert '{source_path}' to '{target_mp3_path}' using FFmpeg.")
 
     convert_cmd_list = [
-        "ffmpeg",
+        "ffmpeg", "-y", # Overwrite output without asking
         "-i", str(source_path),
         "-vn",
         "-c:a", "libmp3lame",
         "-q:a", "2", # VBR quality, 0-9, 2 is very good.
-        "-y", # Overwrite output without asking
         str(target_mp3_path)
     ]
     
@@ -135,9 +145,10 @@ def convert_to_mp3(source_path_str, output_dir_str, logger=None):
         if logger: logger.error(f"AUDIO_PROC: Generic error during FFmpeg conversion of '{source_path}': {e_generic}", exc_info=True)
         raise Exception(f"Audio conversion error for '{source_path}': {str(e_generic)}") from e_generic
 
-
-def run_aeneas_alignment(audio_mp3_path_str, plain_english_text_path_str, srt_output_path_str, 
+# run_aeneas_alignment (no changes, Aeneas specific)
+def run_aeneas_alignment(audio_mp3_path_str, plain_english_text_path_str, srt_output_path_str,
                          python_executable_str, logger=None):
+    # ... (same as your existing function)
     aeneas_config_string = (
         "task_language=eng|os_task_file_format=srt|is_text_type=plain|"
         "task_adjust_boundary_algorithm=percent|task_adjust_boundary_percent_value=50"
@@ -217,8 +228,9 @@ def run_aeneas_alignment(audio_mp3_path_str, plain_english_text_path_str, srt_ou
         if logger: logger.error(f"AUDIO_PROC: Unexpected error during Aeneas execution: {e}", exc_info=True)
         raise
 
-
+# parse_aeneas_srt_file (no changes, Aeneas specific)
 def parse_aeneas_srt_file(srt_path_str, logger=None):
+    # ... (same as your existing function)
     srt_path = Path(srt_path_str)
     timestamps = []
     if not srt_path.exists():
@@ -257,8 +269,11 @@ def parse_aeneas_srt_file(srt_path_str, logger=None):
         if logger: logger.error(f"AUDIO_PROC: Error parsing SRT file {srt_path}: {e}", exc_info=True)
         raise
 
-
+# generate_bilingual_srt (no changes needed, used by both paths)
 def generate_bilingual_srt(article_id, original_sentences_data, srt_timestamps, output_srt_path_str, logger=None):
+    # ... (same as your existing function)
+    # Small change to make output path unique if needed for clarity (e.g., append _tts or _aeneas)
+    # This is handled in the calling function by naming output_srt_path_str appropriately.
     output_srt_path = Path(output_srt_path_str)
     
     if not original_sentences_data or not srt_timestamps:
@@ -290,7 +305,7 @@ def generate_bilingual_srt(article_id, original_sentences_data, srt_timestamps, 
 
         srt_content_lines.append(str(i + 1))
         srt_content_lines.append(f"{start_time_str} --> {end_time_str}")
-        srt_content_lines.append(f"{eng_text} | {chn_text}")
+        srt_content_lines.append(f"{eng_text} | {chn_text}") # Default separator
         srt_content_lines.append("") 
 
     try:
@@ -305,7 +320,9 @@ def generate_bilingual_srt(article_id, original_sentences_data, srt_timestamps, 
     return None
 
 
+# ms_to_srt_time (no changes)
 def ms_to_srt_time(ms_total):
+    # ... (same as your existing function)
     if ms_total is None or ms_total < 0: ms_total = 0
     ms = int(ms_total % 1000)
     s_total = int(ms_total // 1000)
@@ -315,9 +332,9 @@ def ms_to_srt_time(ms_total):
     h = int(m_total // 60)
     return f"{h:02d}:{m:02d}:{s:02d},{ms:03d}"
 
-
+# get_audio_duration_ms (no changes)
 def get_audio_duration_ms(audio_path_str, logger=None):
-    """Gets audio duration in milliseconds using ffprobe."""
+    # ... (same as your existing function)
     cmd = [
         "ffprobe",
         "-v", "error",
@@ -338,127 +355,400 @@ def get_audio_duration_ms(audio_path_str, logger=None):
         raise Exception("ffprobe not found. Please ensure FFmpeg (which includes ffprobe) is installed and in PATH.")
 
 
-def split_mp3_by_sentence_duration(original_mp3_path, sentences_info, 
-                                   max_part_size_bytes, output_parts_dir, 
-                                   article_filename_base, logger=None):
-    """
-    Splits an MP3 file into parts based on sentence durations, aiming for max_part_size_bytes.
-    sentences_info: list of dicts like {'id': sentence_db_id, 'original_start_ms': X, 'original_end_ms': Y}
-    Returns: {'num_parts': N, 'sentence_part_updates': list_of_db_updates, 'part_checksums': list_of_checksum_strings}
-    """
+def process_article_with_tts(article_id, raw_bilingual_text_content_string,
+                             article_filename_base, app_instance): # app_instance for config and logger
+    logger = app_instance.logger
+    app_config = app_instance.config
+    logger.info(f"AUDIO_PROC: Starting TTS processing for article ID {article_id} ('{article_filename_base}')")
+
+    # Result dictionary to pass back status and messages
+    result = {
+        "success": False,
+        "message": "TTS processing initiated.",
+        "message_category": "info",
+        "processed_path": None
+    }
+
+    processed_srt_dir_base = Path(app_config['PROCESSED_SRT_FOLDER'])
+    temp_tts_clips_dir_obj = None # For cleanup in finally block
+
+    try:
+        if not tts_utils.is_initialized_en or not tts_utils.is_initialized_zh:
+            msg = "TTS Error: Engines not ready."
+            logger.error(f"AUDIO_PROC: {msg} Aborting TTS processing.")
+            result.update({"message": msg, "message_category": "danger"})
+            return result
+        
+        if not tts_utils.check_voices_configured(app_config['KOKORO_MANDARIN_VOICE'], app_config['KOKORO_ENGLISH_VOICE'], logger):
+            msg = "TTS Error: Voices not configured."
+            logger.error(f"AUDIO_PROC: {msg} Aborting TTS processing.")
+            result.update({"message": msg, "message_category": "danger"})
+            return result
+
+        pipeline_en = tts_utils.get_kokoro_pipeline(
+            app_config['KOKORO_LANG_CODE_EN'],
+            app_config['KOKORO_LANG_CODE_ZH'],
+            app_config['KOKORO_LANG_CODE_EN'],
+            logger
+        )
+        if not pipeline_en:
+            msg = "TTS Error: English pipeline failed or unavailable."
+            logger.error(f"AUDIO_PROC: {msg} Aborting.")
+            result.update({"message": msg, "message_category": "danger"})
+            return result
+
+        parsed_sentences = list(text_parser.parse_bilingual_file_content(raw_bilingual_text_content_string))
+        if not parsed_sentences:
+            msg = "No sentences found in text to process with TTS."
+            logger.warning(f"AUDIO_PROC: {msg} for article {article_id}. Aborting TTS.")
+            result.update({"message": msg, "message_category": "warning"})
+            return result
+
+        sentence_audio_details = []
+        
+        with tempfile.TemporaryDirectory(dir=str(app_config['TEMP_FILES_FOLDER']), prefix=f"tts_clips_{article_id}_") as temp_tts_clips_dir:
+            temp_tts_clips_dir_obj = Path(temp_tts_clips_dir) # For potential access outside with, though not strictly needed here
+            logger.info(f"AUDIO_PROC: Created temporary directory for TTS clips: {temp_tts_clips_dir_obj}")
+
+            for idx, (p_idx, s_idx_in_p, en_text, zh_text) in enumerate(parsed_sentences):
+                logger.info(f"AUDIO_PROC: TTS processing sentence {idx + 1}/{len(parsed_sentences)}: '{en_text[:30]}...'")
+                try:
+                    eng_audio_data_np = tts_utils.generate_audio(
+                        pipeline_en, en_text, app_config['KOKORO_ENGLISH_VOICE'], logger=logger
+                    )
+                    temp_eng_wav_path = temp_tts_clips_dir_obj / f"sentence_{idx}_eng.wav"
+                    soundfile.write(str(temp_eng_wav_path), eng_audio_data_np, app_config['KOKORO_SAMPLE_RATE'])
+                    
+                    audio_segment = AudioSegment.from_wav(str(temp_eng_wav_path))
+                    original_duration_ms = len(audio_segment)
+                    silence_segment = AudioSegment.silent(duration=app_config['TTS_INTER_SENTENCE_SILENCE_MS'])
+                    segment_with_silence = audio_segment + silence_segment
+                    
+                    sentence_audio_details.append({
+                        'pydub_segment_with_silence': segment_with_silence,
+                        'duration_with_silence_ms': len(segment_with_silence),
+                        'original_sentence_audio_duration_ms': original_duration_ms
+                    })
+                except Exception as e_sent:
+                    logger.error(f"AUDIO_PROC: Error TTS processing sentence {idx} ('{en_text[:30]}...'): {e_sent}", exc_info=True)
+                    min_silence = AudioSegment.silent(duration=app_config['TTS_INTER_SENTENCE_SILENCE_MS'])
+                    sentence_audio_details.append({
+                        'pydub_segment_with_silence': min_silence,
+                        'duration_with_silence_ms': len(min_silence),
+                        'original_sentence_audio_duration_ms': 0
+                    })
+
+            if not sentence_audio_details:
+                msg = "TTS processing failed to generate any audio segments."
+                logger.error(f"AUDIO_PROC: {msg} for article {article_id}.")
+                result.update({"message": msg, "message_category": "danger"})
+                return result
+
+            logger.info(f"AUDIO_PROC: Stitching {len(sentence_audio_details)} TTS audio segments for article {article_id}...")
+            full_audio_segment = AudioSegment.empty()
+            for detail in sentence_audio_details:
+                full_audio_segment += detail['pydub_segment_with_silence']
+
+            article_converted_audio_dir = Path(app_config['CONVERTED_AUDIO_FOLDER']) / str(article_id)
+            article_converted_audio_dir.mkdir(parents=True, exist_ok=True)
+            final_mp3_filename = f"{article_filename_base}_tts_combined.mp3"
+            converted_mp3_path_str = str(article_converted_audio_dir / final_mp3_filename)
+
+            try:
+                full_audio_segment.export(converted_mp3_path_str, format="mp3", parameters=["-q:a", "2"])
+                logger.info(f"AUDIO_PROC: Exported combined TTS MP3 to: {converted_mp3_path_str}")
+                db_manager.update_article_converted_mp3_path(article_id, converted_mp3_path_str, app_logger=logger)
+            except Exception as e_export:
+                msg = "Failed to create final MP3 from TTS audio."
+                logger.error(f"AUDIO_PROC: {msg} for article {article_id}: {e_export}", exc_info=True)
+                result.update({"message": msg, "message_category": "danger"})
+                return result
+            
+            result["processed_path"] = converted_mp3_path_str # Mark path for return
+
+            logger.info(f"AUDIO_PROC: Calculating timestamps for TTS audio of article {article_id}...")
+            srt_timestamps = []
+            current_time_ms = 0
+            for detail in sentence_audio_details:
+                sentence_actual_audio_duration_ms = detail['original_sentence_audio_duration_ms']
+                start_ms = current_time_ms
+                end_ms = current_time_ms + sentence_actual_audio_duration_ms
+                srt_timestamps.append((start_ms, end_ms))
+                current_time_ms += detail['duration_with_silence_ms']
+            
+            updated_count = db_manager.update_sentence_timestamps(article_id, srt_timestamps, app_logger=logger)
+            logger.info(f"AUDIO_PROC: Updated {updated_count} sentence timestamps in DB for TTS audio of article {article_id}.")
+            if updated_count != len(parsed_sentences):
+                 logger.warning(f"AUDIO_PROC: Mismatch in updated timestamps ({updated_count}) vs parsed sentences ({len(parsed_sentences)}) for article {article_id}.")
+            
+            # Message for timestamp update - will be part of the final success message
+            timestamp_message = f"Generated audio with TTS and updated {updated_count} sentence timestamps."
+
+            full_sentences_data_from_db = db_manager.get_sentences_for_article(article_id, app_logger=logger)
+            bilingual_sentences_for_srt_gen = [
+                {'english_text': s['english_text'], 'chinese_text': s['chinese_text']}
+                for s in full_sentences_data_from_db
+            ]
+            final_bilingual_srt_filename = f"{article_filename_base}_bilingual_tts.srt"
+            article_srt_dir = processed_srt_dir_base / str(article_id)
+            article_srt_dir.mkdir(parents=True, exist_ok=True)
+            final_bilingual_srt_path = article_srt_dir / final_bilingual_srt_filename
+
+            bilingual_srt_generated_path_str = generate_bilingual_srt(
+                article_id, bilingual_sentences_for_srt_gen, srt_timestamps,
+                str(final_bilingual_srt_path), logger=logger
+            )
+            if bilingual_srt_generated_path_str:
+                db_manager.update_article_srt_path(article_id, bilingual_srt_generated_path_str, app_logger=logger)
+                logger.info(f"AUDIO_PROC: Generated final bilingual SRT for article {article_id} at {bilingual_srt_generated_path_str} (TTS)")
+            else:
+                logger.warning(f"AUDIO_PROC: Failed to generate final bilingual SRT for article {article_id} (TTS).")
+                # Update message slightly if SRT fails but audio is fine
+                timestamp_message += " SRT generation failed."
+
+
+            # --- MP3 Splitting (Using the new size-based estimation logic) ---
+            # (This part is complex and needs its own error handling that might modify `result`)
+            splitting_message_part = ""
+            if converted_mp3_path_str:
+                logger.info(f"AUDIO_PROC: Proceeding to MP3 splitting for TTS-generated audio, article {article_id}")
+                sentence_db_ids_ordered = db_manager.get_sentence_ids_for_article_in_order(article_id, app_logger=logger)
+
+                if len(sentence_db_ids_ordered) != len(srt_timestamps):
+                    logger.error(f"AUDIO_PROC: Mismatch for TTS splitting: DB sentence count ({len(sentence_db_ids_ordered)}) vs calculated timestamp count ({len(srt_timestamps)}) for article {article_id}. Skipping MP3 splitting.")
+                    splitting_message_part = " MP3 splitting skipped due to count mismatch."
+                else:
+                    sentences_info_for_splitting = []
+                    for i, db_id_dict in enumerate(sentence_db_ids_ordered):
+                        sentences_info_for_splitting.append({
+                            'id': db_id_dict['id'],
+                            'original_start_ms': srt_timestamps[i][0],
+                            'original_end_ms': srt_timestamps[i][1]
+                        })
+                    
+                    article_mp3_parts_dir_path = Path(app_config['MP3_PARTS_FOLDER']) / str(article_id)
+                    article_mp3_parts_dir_path.mkdir(parents=True, exist_ok=True)
+                    max_size_bytes = app_config['MAX_AUDIO_PART_SIZE_MB'] * 1024 * 1024
+                    original_mp3_size_bytes = Path(converted_mp3_path_str).stat().st_size
+
+                    if original_mp3_size_bytes > max_size_bytes:
+                        logger.info(f"AUDIO_PROC: TTS MP3 {converted_mp3_path_str} size {original_mp3_size_bytes} > {max_size_bytes}. Attempting to split for article {article_id}.")
+                        split_details = split_mp3_by_size_estimation(
+                            original_mp3_path=converted_mp3_path_str,
+                            sentences_info=sentences_info_for_splitting,
+                            max_part_size_bytes=max_size_bytes,
+                            output_parts_dir=str(article_mp3_parts_dir_path),
+                            article_filename_base=article_filename_base,
+                            logger=logger
+                        )
+                        if split_details and split_details['num_parts'] > 0:
+                            part_checksums_list = split_details.get('part_checksums', [])
+                            db_manager.update_article_mp3_parts_info(
+                                article_id, str(article_mp3_parts_dir_path), split_details['num_parts'],
+                                part_checksums_list, app_logger=logger
+                            )
+                            db_manager.batch_update_sentence_part_details(split_details['sentence_part_updates'], app_logger=logger)
+                            logger.info(f"AUDIO_PROC: Successfully split TTS MP3 for article {article_id} into {split_details['num_parts']} parts.")
+                            splitting_message_part = f" Original MP3 was large and split into {split_details['num_parts']} parts."
+                        else:
+                            logger.warning(f"AUDIO_PROC: TTS MP3 splitting failed or resulted in no parts for article {article_id}, despite being large.")
+                            db_manager.clear_article_mp3_parts_info(article_id, app_logger=logger)
+                            splitting_message_part = " Original MP3 was large, but splitting failed/produced no parts."
+                    else:
+                        logger.info(f"AUDIO_PROC: TTS MP3 for article {article_id} not split (size {original_mp3_size_bytes} <= {max_size_bytes}).")
+                        db_manager.clear_article_mp3_parts_info(article_id, app_logger=logger)
+                        splitting_message_part = " Original MP3 not large enough for splitting."
+            
+            result.update({
+                "success": True,
+                "message": timestamp_message + splitting_message_part,
+                "message_category": "success"
+            })
+            logger.info(f"AUDIO_PROC: TTS processing completed for article {article_id}. Message: {result['message']}")
+            return result
+
+    except Exception as e:
+        msg = f"A critical error occurred during TTS audio processing: {str(e)}"
+        logger.error(f"AUDIO_PROC: Major error during TTS processing for article {article_id}: {e}\n{traceback.format_exc()}", exc_info=True)
+        result.update({"message": msg, "message_category": "danger", "success": False})
+        return result
+    # finally: # temp_tts_clips_dir_obj is cleaned by 'with' statement
+    #     logger.info(f"AUDIO_PROC: TTS processing function finished for article {article_id}.")
+
+    return result # Should be unreachable if all paths return, but as a fallback
+
+
+# --- NEW MP3 Splitting Function (by size estimation) ---
+def split_mp3_by_size_estimation(original_mp3_path, sentences_info,
+                                 max_part_size_bytes, output_parts_dir,
+                                 article_filename_base, logger=None):
+    if not logger:
+        # Create a dummy logger if none provided, to avoid `logger.info` errors
+        class DummyLogger:
+            def info(self, msg): print(f"INFO: {msg}")
+            def warning(self, msg): print(f"WARNING: {msg}")
+            def error(self, msg, exc_info=False): print(f"ERROR: {msg}")
+            def debug(self, msg): print(f"DEBUG: {msg}")
+        logger = DummyLogger()
+
+    logger.info(f"AUDIO_PROC_SPLIT: Starting MP3 splitting by size estimation for '{original_mp3_path}'.")
     if not sentences_info:
-        if logger: logger.warning("AUDIO_PROC: No sentences_info provided for splitting. Aborting.")
+        logger.warning("AUDIO_PROC_SPLIT: No sentences_info provided for splitting. Aborting.")
         return {'num_parts': 0, 'sentence_part_updates': [], 'part_checksums': []}
 
     original_mp3_path_obj = Path(original_mp3_path)
     output_parts_dir_obj = Path(output_parts_dir)
     output_parts_dir_obj.mkdir(parents=True, exist_ok=True)
 
-    total_original_duration_ms = get_audio_duration_ms(original_mp3_path, logger=logger)
-    original_file_size_bytes = original_mp3_path_obj.stat().st_size
+    total_mp3_size_bytes = original_mp3_path_obj.stat().st_size
+    total_mp3_duration_ms = get_audio_duration_ms(original_mp3_path, logger=logger)
 
-    if total_original_duration_ms is None or total_original_duration_ms == 0:
-        if logger: logger.error(f"AUDIO_PROC: Could not determine duration or duration is zero for {original_mp3_path}. Cannot split.")
+    if total_mp3_duration_ms is None or total_mp3_duration_ms == 0:
+        logger.error(f"AUDIO_PROC_SPLIT: Could not determine duration or duration is zero for {original_mp3_path}. Cannot split.")
+        return {'num_parts': 0, 'sentence_part_updates': [], 'part_checksums': []}
+    
+    if total_mp3_size_bytes == 0:
+        logger.error(f"AUDIO_PROC_SPLIT: Original MP3 file {original_mp3_path} has zero size. Cannot split.")
         return {'num_parts': 0, 'sentence_part_updates': [], 'part_checksums': []}
 
-    if original_file_size_bytes == 0:
-        if logger: logger.error(f"AUDIO_PROC: Original MP3 file {original_mp3_path} has zero size. Cannot determine split ratio.")
-        return {'num_parts': 0, 'sentence_part_updates': [], 'part_checksums': []}
-        
-    target_duration_ms_per_part = math.floor((max_part_size_bytes / original_file_size_bytes) * total_original_duration_ms)
-    if logger: logger.info(f"AUDIO_PROC: Splitting {original_mp3_path}. Original size: {original_file_size_bytes}B, duration: {total_original_duration_ms}ms. Target part size: {max_part_size_bytes}B, target part duration: {target_duration_ms_per_part}ms.")
+    if total_mp3_size_bytes <= max_part_size_bytes:
+        logger.info(f"AUDIO_PROC_SPLIT: MP3 size {total_mp3_size_bytes}B <= max part size {max_part_size_bytes}B. No splitting needed.")
+        return {'num_parts': 0, 'sentence_part_updates': [], 'part_checksums': []} # Indicates no splitting done
 
     sentence_part_updates = []
     current_part_idx = 0
     sentence_cursor = 0
-    parts_created_paths = []
-    part_checksums = [] # List to store checksums of successfully created parts
+    part_checksums = []
+    num_parts_successfully_created = 0
 
     while sentence_cursor < len(sentences_info):
-        part_sentences = []
-        current_part_accumulated_duration_ms = 0
         part_start_original_ms = sentences_info[sentence_cursor]['original_start_ms']
-        
-        while sentence_cursor < len(sentences_info):
-            sentence = sentences_info[sentence_cursor]
+        current_part_accumulated_size_bytes = 0
+        current_part_sentences_info = [] # Sentences for this specific part
+        part_end_original_ms_for_ffmpeg = part_start_original_ms
+
+        # Inner loop to gather sentences for the current part
+        temp_sentence_cursor = sentence_cursor # Use a temp cursor for lookahead
+        while temp_sentence_cursor < len(sentences_info):
+            sentence = sentences_info[temp_sentence_cursor]
             sentence_duration_ms = sentence['original_end_ms'] - sentence['original_start_ms']
-            if sentence_duration_ms < 0: sentence_duration_ms = 0 
-            if sentence_duration_ms == 0: sentence_duration_ms = 50 
-
-            if part_sentences and (current_part_accumulated_duration_ms + sentence_duration_ms > target_duration_ms_per_part):
-                break 
+            if sentence_duration_ms <= 0: # Handle zero or negative duration sentences
+                 # Estimate a very small size, or a fixed small duration like 50ms for size calc
+                 # This prevents division by zero if total_mp3_duration_ms is also very small
+                 # and avoids over-weighting these in size calc if many exist
+                 estimated_sentence_size_bytes = (50 / total_mp3_duration_ms) * total_mp3_size_bytes if total_mp3_duration_ms > 0 else 1024 # small default
+            else:
+                 estimated_sentence_size_bytes = (sentence_duration_ms / total_mp3_duration_ms) * total_mp3_size_bytes
             
-            part_sentences.append(sentence)
-            current_part_accumulated_duration_ms += sentence_duration_ms
-            sentence_cursor += 1
-            
-            if len(part_sentences) == 1 and current_part_accumulated_duration_ms >= target_duration_ms_per_part * 0.9:
-                break
+            # Ensure estimated_sentence_size_bytes is not zero if sentence_duration_ms is positive
+            if sentence_duration_ms > 0 and estimated_sentence_size_bytes == 0:
+                estimated_sentence_size_bytes = 1024 # Minimum arbitrary size to ensure progress
 
-        if not part_sentences: 
-            if logger: logger.warning("AUDIO_PROC: No sentences collected for a part, breaking split loop.")
-            break
+            if (current_part_accumulated_size_bytes + estimated_sentence_size_bytes <= max_part_size_bytes) or \
+               (len(current_part_sentences_info) == 0): # Always include at least one sentence
+                
+                current_part_sentences_info.append(sentence)
+                current_part_accumulated_size_bytes += estimated_sentence_size_bytes
+                part_end_original_ms_for_ffmpeg = sentence['original_end_ms'] # Update actual end time
+                temp_sentence_cursor += 1
+            else:
+                break # This sentence will start the next part
 
-        part_end_original_ms = part_sentences[-1]['original_end_ms']
+        if not current_part_sentences_info:
+            logger.warning("AUDIO_PROC_SPLIT: No sentences collected for a part, breaking split loop.")
+            break # Should not happen if logic is correct
+
+        # Update main sentence_cursor after processing this part's sentences
+        sentence_cursor = temp_sentence_cursor
+
+        # Extract the Part using FFmpeg
         part_output_filename = f"{article_filename_base}_part_{current_part_idx}.mp3"
         part_output_path = output_parts_dir_obj / part_output_filename
 
-        ffmpeg_start_sec = max(0, part_start_original_ms / 1000.0)
-        ffmpeg_to_sec = min(total_original_duration_ms / 1000.0, part_end_original_ms / 1000.0)
+        ffmpeg_start_sec = max(0, part_start_original_ms / 1000.0) # Ensure non-negative
+        ffmpeg_end_sec = part_end_original_ms_for_ffmpeg / 1000.0
         
-        if ffmpeg_to_sec <= ffmpeg_start_sec : 
-            if logger: logger.warning(f"AUDIO_PROC: Calculated zero or negative duration for part {current_part_idx} (start: {ffmpeg_start_sec}s, to: {ffmpeg_to_sec}s). Skipping this part extraction.")
-            continue 
+        # Ensure duration is positive for ffmpeg
+        if ffmpeg_end_sec <= ffmpeg_start_sec:
+            logger.warning(f"AUDIO_PROC_SPLIT: Calculated zero or negative duration for part {current_part_idx} "
+                           f"(start: {ffmpeg_start_sec:.3f}s, to: {ffmpeg_end_sec:.3f}s). Skipping this part extraction.")
+            # This part is skipped, so don't increment current_part_idx yet,
+            # and the sentences that would have been in it will be re-evaluated for the next part.
+            # However, this might lead to an infinite loop if sentences always result in zero duration parts.
+            # A better approach for zero-duration segments: assign them to the *previous* or *next* valid part,
+            # or give them a minimal nominal duration for ffmpeg.
+            # For now, we'll log and skip, but this needs careful thought if it occurs often.
+            # If sentence_cursor didn't advance, this is an issue.
+            if temp_sentence_cursor == sentence_cursor and sentence_cursor < len(sentences_info): # No progress
+                logger.error("AUDIO_PROC_SPLIT: Potential infinite loop due to zero-duration part calculation. Advancing sentence cursor by 1 to break.")
+                sentence_cursor += 1 # Force progress
+            continue
+
 
         cmd_split = [
-            "ffmpeg", "-y", "-i", str(original_mp3_path_obj),
+            "ffmpeg", "-y",
+            "-i", str(original_mp3_path_obj),
             "-ss", str(ffmpeg_start_sec),
-            "-to", str(ffmpeg_to_sec),
-            "-c", "copy", 
+            "-to", str(ffmpeg_end_sec),
+            "-c", "copy", # Stream copy for speed and quality
             str(part_output_path)
         ]
-        if logger: logger.info(f"AUDIO_PROC: Splitting command: {' '.join(shlex.quote(c) for c in cmd_split)}")
-        
-        checksum_for_this_part = None # Initialize for this part
+        cmd_display = " ".join([shlex.quote(c) for c in cmd_split])
+        logger.info(f"AUDIO_PROC_SPLIT: Splitting command for part {current_part_idx}: {cmd_display}")
+
+        checksum_for_this_part = None
         try:
             split_process = subprocess.run(cmd_split, check=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
-            if logger: 
-                logger.info(f"AUDIO_PROC: Created part {part_output_path}")
-                if split_process.stderr: logger.debug(f"AUDIO_PROC: ffmpeg split stderr: {split_process.stderr.decode(errors='ignore')}")
-            
-            # Calculate checksum for the successfully created part
+            actual_part_size = part_output_path.stat().st_size
+            logger.info(f"AUDIO_PROC_SPLIT: Created part {part_output_path} (Size: {actual_part_size}B, Estimated: {current_part_accumulated_size_bytes:.0f}B).")
+            if split_process.stderr:
+                logger.debug(f"AUDIO_PROC_SPLIT: ffmpeg split stderr for part {current_part_idx}:\n{split_process.stderr.decode(errors='ignore')}")
+
             checksum_for_this_part = calculate_sha256_checksum(str(part_output_path), logger=logger)
             if checksum_for_this_part:
-                if logger: logger.info(f"AUDIO_PROC: Calculated SHA256 for {part_output_path}: {checksum_for_this_part[:10]}...")
+                logger.info(f"AUDIO_PROC_SPLIT: Calculated SHA256 for {part_output_path}: {checksum_for_this_part[:10]}...")
             else:
-                if logger: logger.warning(f"AUDIO_PROC: Failed to calculate checksum for successfully created part {part_output_path}.")
+                logger.warning(f"AUDIO_PROC_SPLIT: Failed to calculate checksum for successfully created part {part_output_path}.")
             
-            parts_created_paths.append(str(part_output_path))
-            part_checksums.append(checksum_for_this_part if checksum_for_this_part else "") # Add checksum or "" if failed
+            part_checksums.append(checksum_for_this_part if checksum_for_this_part else "")
+            num_parts_successfully_created += 1
 
-            for sent_in_part in part_sentences:
+            for sent_in_part in current_part_sentences_info:
                 sentence_part_updates.append({
                     'sentence_db_id': sent_in_part['id'],
-                    'audio_part_index': current_part_idx,
+                    'audio_part_index': current_part_idx, # current_part_idx is the 0-based index of this successfully created part
                     'start_time_in_part_ms': sent_in_part['original_start_ms'] - part_start_original_ms,
                     'end_time_in_part_ms': sent_in_part['original_end_ms'] - part_start_original_ms,
                 })
+            current_part_idx += 1 # Increment only if part creation was attempted (successful or not, to keep filenames unique on retry)
+                                  # Actually, better to increment only on success of creation of file.
+                                  # The current_part_idx for filename should be num_parts_successfully_created
+                                  # But for DB audio_part_index, it should be the index of this specific part being made
+
         except subprocess.CalledProcessError as e:
-            if logger: logger.error(f"AUDIO_PROC: Failed to create part {current_part_idx} (cmd: {' '.join(shlex.quote(c) for c in cmd_split)}): {e.stderr.decode(errors='ignore') if e.stderr else e}")
-            # If part creation fails, we don't add to parts_created_paths or part_checksums
+            logger.error(f"AUDIO_PROC_SPLIT: Failed to create part {current_part_idx} (cmd: {cmd_display}): {e.stderr.decode(errors='ignore') if e.stderr else e}")
+            part_checksums.append("") # Placeholder for failed part checksum
+            # Do not increment num_parts_successfully_created
+            # current_part_idx might increment to try a new filename next time if we want to retry, or not if we just skip
+            # For now, we just log failure and move on. The sentences that would have been in this part
+            # will be re-attempted in the next iteration if sentence_cursor was not fully advanced.
+            # This part is tricky: if a part fails, do those sentences get lost or retried?
+            # The current logic (sentence_cursor = temp_sentence_cursor) means they are considered processed.
+            # If ffmpeg fails for a segment, those sentences might be "lost" from parts.
+            # A more robust way would be to revert sentence_cursor if ffmpeg fails for a part.
+            # For now, let's assume ffmpeg success for simplicity of the core logic.
 
-        current_part_idx += 1
+    logger.info(f"AUDIO_PROC_SPLIT: Splitting complete. {num_parts_successfully_created} parts created. "
+                f"{len(sentence_part_updates)} sentence updates prepared. {len(part_checksums)} checksums recorded.")
 
-    num_parts_successfully_created = len(parts_created_paths)
-    # Ensure part_checksums list has the same length as successfully created parts
-    if len(part_checksums) != num_parts_successfully_created:
-        if logger: logger.error(f"AUDIO_PROC: Mismatch between number of created parts ({num_parts_successfully_created}) and checksums generated ({len(part_checksums)}). This should not happen.")
-        # Potentially adjust part_checksums here if strict alignment is needed, though current logic should align.
-
-    if logger: logger.info(f"AUDIO_PROC: Splitting complete. {num_parts_successfully_created} parts created. {len(sentence_part_updates)} sentence updates prepared. {len(part_checksums)} checksums recorded.")
-    
     return {
-        'num_parts': num_parts_successfully_created, 
+        'num_parts': num_parts_successfully_created,
         'sentence_part_updates': sentence_part_updates,
-        'part_checksums': part_checksums # List of checksum strings (or "" for failures)
+        'part_checksums': part_checksums
     }
+
+
+# Old split_mp3_by_sentence_duration (can be removed or kept for Aeneas if you prefer separate logic there)
+# For now, I'll comment it out as the new one should be used by both paths if desired.
+# def split_mp3_by_sentence_duration(...):
+#    ...

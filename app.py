@@ -1,54 +1,78 @@
 import os
 import tempfile
-import shutil 
+import shutil
 from pathlib import Path
 from flask import Flask, render_template, request, redirect, url_for, flash, jsonify, send_from_directory
 from werkzeug.utils import secure_filename
-import db_manager  
-import text_parser 
-import audio_processor 
+import db_manager
+import text_parser
+import audio_processor
+import tts_utils # <-- NEW IMPORT
 
 import logging
 from logging.handlers import RotatingFileHandler
 
 # Configuration
-UPLOAD_FOLDER = 'uploads' 
+UPLOAD_FOLDER = 'uploads'
 ALLOWED_TEXT_EXTENSIONS = {'txt'}
-ALLOWED_AUDIO_EXTENSIONS = {'mp3', 'mp4', 'wav', 'm4a'} 
+ALLOWED_AUDIO_EXTENSIONS = {'mp3', 'mp4', 'wav', 'm4a'}
 
 app = Flask(__name__)
 app.config['UPLOAD_FOLDER'] = UPLOAD_FOLDER
-app.config['SECRET_KEY'] = 'your_very_secret_key_here_please_change_me'
-app.config['AENEAS_PYTHON_PATH'] = r"C:\Program Files\Python39\python.exe" 
+app.config['SECRET_KEY'] = 'your_very_secret_key_here_please_change_me' # TODO: Change this!
+app.config['AENEAS_PYTHON_PATH'] = r"C:\Program Files\Python39\python.exe" # TODO: Make this environment configurable
 app.config['PROCESSED_SRT_FOLDER'] = os.path.join(app.instance_path, 'processed_srts')
 app.config['TEMP_FILES_FOLDER'] = os.path.join(app.instance_path, 'temp_files')
 app.config['CONVERTED_AUDIO_FOLDER'] = os.path.join(app.instance_path, 'converted_audio')
-app.config['MP3_PARTS_FOLDER'] = os.path.join(app.instance_path, 'mp3_parts') # New folder for split MP3s
-app.config['MAX_AUDIO_PART_SIZE_MB'] = 20 # Max size for MP3 parts (iOS target)
+app.config['MP3_PARTS_FOLDER'] = os.path.join(app.instance_path, 'mp3_parts')
+app.config['MAX_AUDIO_PART_SIZE_MB'] = 20
+
+# --- NEW TTS Configuration ---
+app.config['KOKORO_MANDARIN_VOICE'] = 'zf_xiaoxiao'  # TODO: REPLACE with your actual Mandarin voice
+app.config['KOKORO_ENGLISH_VOICE'] = 'af_heart'    # TODO: REPLACE with your actual English voice
+app.config['KOKORO_LANG_CODE_ZH'] = 'z'
+app.config['KOKORO_LANG_CODE_EN'] = 'a' # Or 'b' depending on your chosen English voice
+app.config['KOKORO_SAMPLE_RATE'] = 24000 # Kokoro's typical output, confirm if different
+app.config['TTS_INTER_SENTENCE_SILENCE_MS'] = 500
+# --- End NEW TTS Configuration ---
+
 
 # --- Logging Configuration ---
 if not os.path.exists(app.instance_path):
     os.makedirs(app.instance_path)
-    
+
 log_dir = os.path.join(app.instance_path, 'logs')
 if not os.path.exists(log_dir):
     os.makedirs(log_dir)
-    
+
 log_file = os.path.join(log_dir, 'app.log')
 file_handler = RotatingFileHandler(log_file, maxBytes=1024 * 1024 * 10, backupCount=5)
 formatter = logging.Formatter(
     '%(asctime)s %(levelname)s: %(message)s [in %(pathname)s:%(lineno)d]'
 )
 file_handler.setFormatter(formatter)
-file_handler.setLevel(logging.DEBUG) 
+file_handler.setLevel(logging.INFO) # Changed to INFO for production, DEBUG for dev
 app.logger.addHandler(file_handler)
-app.logger.setLevel(logging.DEBUG) 
+app.logger.setLevel(logging.INFO) # Changed to INFO
 app.logger.info('Application startup: File logging configured.')
 
 
 # --- Database Initialization ---
 with app.app_context():
-    db_manager.init_db(app) 
+    db_manager.init_db(app)
+    # --- NEW: Initialize TTS on app startup ---
+    tts_init_success = tts_utils.initialize_kokoro(
+        app.config['KOKORO_LANG_CODE_ZH'],
+        app.config['KOKORO_LANG_CODE_EN'],
+        logger=app.logger
+    )
+    if tts_init_success:
+        app.logger.info("APP: Kokoro TTS engines initialized (or already were).")
+        if not tts_utils.check_voices_configured(app.config['KOKORO_MANDARIN_VOICE'], app.config['KOKORO_ENGLISH_VOICE'], app.logger):
+            app.logger.warning("APP: *** KOKORO VOICES MAY BE MISCONFIGURED IN app.py! TTS might fail. ***")
+    else:
+        app.logger.error("APP: *** KOKORO TTS FAILED TO INITIALIZE. TTS features will be unavailable. ***")
+    # --- End NEW TTS Initialization ---
 
 def allowed_text_file(filename):
     return '.' in filename and \
@@ -59,6 +83,7 @@ def allowed_audio_file(filename):
            filename.rsplit('.', 1)[1].lower() in ALLOWED_AUDIO_EXTENSIONS
 
 def _ensure_dirs_exist():
+    # ... (no change to this function)
     if not os.path.exists(app.config['UPLOAD_FOLDER']):
         os.makedirs(app.config['UPLOAD_FOLDER'])
     if not os.path.exists(app.config['PROCESSED_SRT_FOLDER']):
@@ -67,15 +92,18 @@ def _ensure_dirs_exist():
         os.makedirs(app.config['TEMP_FILES_FOLDER'])
     if not os.path.exists(app.config['CONVERTED_AUDIO_FOLDER']):
         os.makedirs(app.config['CONVERTED_AUDIO_FOLDER'])
-    if not os.path.exists(app.config['MP3_PARTS_FOLDER']): # Ensure MP3 parts folder exists
+    if not os.path.exists(app.config['MP3_PARTS_FOLDER']):
         os.makedirs(app.config['MP3_PARTS_FOLDER'])
 
 _ensure_dirs_exist()
 
-def _process_audio_alignment(article_id, 
-                             audio_file_storage, 
+def _process_audio_alignment(article_id,
+                             audio_file_storage,
                              original_bilingual_text_content_string,
-                             article_filename_base): 
+                             article_filename_base):
+    # ... (This function remains largely the same - Aeneas path)
+    # Minor logging adjustment for clarity if needed
+    app.logger.info(f"APP: Starting AENEAS audio alignment process for article {article_id}")
     temp_dir_base = Path(app.config['TEMP_FILES_FOLDER'])
     processed_srt_dir_base = Path(app.config['PROCESSED_SRT_FOLDER'])
     
@@ -96,7 +124,7 @@ def _process_audio_alignment(article_id,
 
             converted_mp3_path_str = audio_processor.convert_to_mp3(
                 str(original_audio_temp_path),
-                str(article_converted_audio_dir), 
+                str(article_converted_audio_dir),
                 logger=app.logger
             )
             app.logger.info(f"APP: Converted audio stored persistently at: {converted_mp3_path_str} for article {article_id}")
@@ -105,17 +133,17 @@ def _process_audio_alignment(article_id,
 
             english_sentences_list_for_aeneas = []
             if original_bilingual_text_content_string:
-                app.logger.info(f"APP: Extracting English sentences from provided raw bilingual text for article {article_id}...")
+                app.logger.info(f"APP: Extracting English sentences from provided raw bilingual text for article {article_id} (Aeneas)...")
                 english_sentences_list_for_aeneas = audio_processor.extract_english_sentences_for_aeneas(
                     original_bilingual_text_content_string, logger=app.logger
                 )
             else:
-                app.logger.info(f"APP: Fetching English sentences from database for article {article_id} (deferred alignment)...")
+                app.logger.info(f"APP: Fetching English sentences from database for article {article_id} (deferred Aeneas alignment)...")
                 english_sentences_list_for_aeneas = db_manager.get_english_sentences_for_article(article_id)
             
             if not english_sentences_list_for_aeneas:
-                flash("No English sentences available (from text or DB) for alignment.", "warning")
-                app.logger.warning(f"APP: Aborting audio alignment for article {article_id}: No English sentences.")
+                flash("No English sentences available (from text or DB) for Aeneas alignment.", "warning")
+                app.logger.warning(f"APP: Aborting Aeneas audio alignment for article {article_id}: No English sentences.")
                 return None
             else:
                 app.logger.info(f"APP: Using {len(english_sentences_list_for_aeneas)} English sentences for Aeneas for article {article_id}.")
@@ -133,7 +161,7 @@ def _process_audio_alignment(article_id,
             aeneas_srt_temp_path = job_temp_dir_path / aeneas_srt_filename
             app.logger.info(f"APP: Running Aeneas for article {article_id} (MP3: {converted_mp3_path_str}, Text: {plain_text_temp_path}). Output to: {aeneas_srt_temp_path}")
             audio_processor.run_aeneas_alignment(
-                converted_mp3_path_str, 
+                converted_mp3_path_str,
                 str(plain_text_temp_path),
                 str(aeneas_srt_temp_path),
                 app.config['AENEAS_PYTHON_PATH'],
@@ -147,7 +175,7 @@ def _process_audio_alignment(article_id,
                 app.logger.warning(f"APP: Aborting further processing for article {article_id}: No timestamps from Aeneas SRT. Path: {aeneas_srt_temp_path}")
                 if not Path(aeneas_srt_temp_path).exists() or Path(aeneas_srt_temp_path).stat().st_size == 0:
                     app.logger.warning(f"APP: Aeneas SRT file {aeneas_srt_temp_path} is missing or empty for article {article_id}.")
-                return None 
+                return None
             app.logger.info(f"APP: Successfully parsed {len(srt_timestamps)} timestamps from Aeneas SRT for article {article_id}. First 3: {srt_timestamps[:3]}")
 
             updated_count = db_manager.update_sentence_timestamps(article_id, srt_timestamps, app_logger=app.logger)
@@ -155,14 +183,14 @@ def _process_audio_alignment(article_id,
             if updated_count == 0 and srt_timestamps:
                  flash(f"Timestamps parsed from Aeneas SRT ({len(srt_timestamps)} entries), but not applied to any DB sentences for {audio_filename_secure}. Check sentence count matching.", "warning")
             elif updated_count > 0:
-                 flash(f"Aligned audio & updated {updated_count} sentence timestamps for {audio_filename_secure}.", "success")
+                 flash(f"Aligned audio & updated {updated_count} sentence timestamps for {audio_filename_secure} using Aeneas.", "success")
 
             full_sentences_data_from_db = db_manager.get_sentences_for_article(article_id)
             bilingual_sentences_for_srt_gen = [
-                {'english_text': s['english_text'], 'chinese_text': s['chinese_text']} 
+                {'english_text': s['english_text'], 'chinese_text': s['chinese_text']}
                 for s in full_sentences_data_from_db
             ]
-            final_bilingual_srt_filename = f"{article_filename_base}_bilingual.srt"
+            final_bilingual_srt_filename = f"{article_filename_base}_bilingual_aeneas.srt" # Clarify source
             article_srt_dir = processed_srt_dir_base / str(article_id)
             article_srt_dir.mkdir(parents=True, exist_ok=True)
             final_bilingual_srt_path = article_srt_dir / final_bilingual_srt_filename
@@ -170,75 +198,74 @@ def _process_audio_alignment(article_id,
             bilingual_srt_generated_path_str = audio_processor.generate_bilingual_srt(
                 article_id,
                 bilingual_sentences_for_srt_gen,
-                srt_timestamps, 
+                srt_timestamps,
                 str(final_bilingual_srt_path),
                 logger=app.logger
             )
             if bilingual_srt_generated_path_str:
                 db_manager.update_article_srt_path(article_id, bilingual_srt_generated_path_str)
-                app.logger.info(f"APP: Generated final bilingual SRT for article {article_id} at {bilingual_srt_generated_path_str}")
+                app.logger.info(f"APP: Generated final bilingual SRT for article {article_id} at {bilingual_srt_generated_path_str} (Aeneas)")
             else:
-                app.logger.warning(f"APP: Failed to generate final bilingual SRT for article {article_id}.")
-                flash("Failed to generate the final bilingual SRT file.", "warning")
+                app.logger.warning(f"APP: Failed to generate final bilingual SRT for article {article_id} (Aeneas).")
+                flash("Failed to generate the final bilingual SRT file (Aeneas).", "warning")
                 return None
 
-            # --- MP3 Splitting Logic (after main processing) ---
+            # --- MP3 Splitting Logic (after Aeneas main processing) ---
             if converted_mp3_path_str:
-                original_mp3_size_bytes = Path(converted_mp3_path_str).stat().st_size
-                max_size_bytes = app.config['MAX_AUDIO_PART_SIZE_MB'] * 1024 * 1024
+                app.logger.info(f"APP: Proceeding to MP3 splitting for Aeneas-processed audio, article {article_id}")
+                # Using the new splitting logic for consistency, though the old one could also be used here.
+                # For this, we need sentence IDs and their timestamps (which we just got from Aeneas and put in DB).
+                
+                # Fetch sentence IDs in order
+                sentence_db_ids_ordered = db_manager.get_sentence_ids_for_article_in_order(article_id, app_logger=app.logger)
 
-                if original_mp3_size_bytes > max_size_bytes:
-                    app.logger.info(f"APP: Original MP3 {converted_mp3_path_str} size {original_mp3_size_bytes} > {max_size_bytes}. Attempting to split for article {article_id}.")
+                if len(sentence_db_ids_ordered) != len(srt_timestamps):
+                    app.logger.error(f"APP: Mismatch for Aeneas splitting: DB sentence count ({len(sentence_db_ids_ordered)}) vs SRT timestamp count ({len(srt_timestamps)}) for article {article_id}. Skipping MP3 splitting.")
+                else:
+                    sentences_info_for_splitting = []
+                    for i, db_id_dict in enumerate(sentence_db_ids_ordered):
+                        sentences_info_for_splitting.append({
+                            'id': db_id_dict['id'],
+                            'original_start_ms': srt_timestamps[i][0],
+                            'original_end_ms': srt_timestamps[i][1]
+                        })
                     
                     article_mp3_parts_dir_path = Path(app.config['MP3_PARTS_FOLDER']) / str(article_id)
                     article_mp3_parts_dir_path.mkdir(parents=True, exist_ok=True)
 
-                    sentence_db_ids_ordered = db_manager.get_sentence_ids_for_article_in_order(article_id, app_logger=app.logger)
+                    split_details = audio_processor.split_mp3_by_size_estimation(
+                        original_mp3_path=converted_mp3_path_str,
+                        sentences_info=sentences_info_for_splitting,
+                        max_part_size_bytes=app.config['MAX_AUDIO_PART_SIZE_MB'] * 1024 * 1024,
+                        output_parts_dir=str(article_mp3_parts_dir_path),
+                        article_filename_base=article_filename_base,
+                        logger=app.logger
+                    )
 
-                    if len(sentence_db_ids_ordered) != len(srt_timestamps):
-                        app.logger.error(f"APP: Mismatch: DB sentence count ({len(sentence_db_ids_ordered)}) vs SRT timestamp count ({len(srt_timestamps)}) for article {article_id}. Skipping MP3 splitting.")
-                    else:
-                        sentences_info_for_splitting = []
-                        for i, db_id_dict in enumerate(sentence_db_ids_ordered):
-                            sentences_info_for_splitting.append({
-                                'id': db_id_dict['id'], 
-                                'original_start_ms': srt_timestamps[i][0],
-                                'original_end_ms': srt_timestamps[i][1]
-                            })
-                        
-                        split_details = audio_processor.split_mp3_by_sentence_duration(
-                            original_mp3_path=converted_mp3_path_str,
-                            sentences_info=sentences_info_for_splitting,
-                            max_part_size_bytes=max_size_bytes,
-                            output_parts_dir=str(article_mp3_parts_dir_path),
-                            article_filename_base=article_filename_base, 
-                            logger=app.logger
+                    if split_details and split_details['num_parts'] > 0:
+                        part_checksums_list = split_details.get('part_checksums', [])
+                        db_manager.update_article_mp3_parts_info(
+                            article_id,
+                            str(article_mp3_parts_dir_path),
+                            split_details['num_parts'],
+                            part_checksums_list,
+                            app_logger=app.logger
                         )
-
-                        if split_details and split_details['num_parts'] > 0:
-                            part_checksums_list = split_details.get('part_checksums', []) 
-                            db_manager.update_article_mp3_parts_info(
-                                article_id, 
-                                str(article_mp3_parts_dir_path), 
-                                split_details['num_parts'],
-                                part_checksums_list, 
-                                app_logger=app.logger
-                            )
-                            db_manager.batch_update_sentence_part_details(split_details['sentence_part_updates'], app_logger=app.logger)
-                            app.logger.info(f"APP: Successfully split MP3 for article {article_id} into {split_details['num_parts']} parts. Stored in {article_mp3_parts_dir_path}. Checksums {'processed' if part_checksums_list else 'not available'}.")
-                            flash(f"Audio processed. Original MP3 was large and split into {split_details['num_parts']} parts for compatibility.", "info")
-                        else:
-                            app.logger.warning(f"APP: MP3 splitting failed or resulted in no parts for article {article_id}. Clearing any previous part info.")
-                            db_manager.clear_article_mp3_parts_info(article_id, app_logger=app.logger) 
-                            flash("Audio processed. Original MP3 was large, but splitting failed or produced no parts.", "warning")
-                else: 
-                    app.logger.info(f"APP: Original MP3 {converted_mp3_path_str} size {original_mp3_size_bytes} <= {max_size_bytes}. No splitting needed. Clearing any previous part info for article {article_id}.")
-                    db_manager.clear_article_mp3_parts_info(article_id, app_logger=app.logger) 
+                        db_manager.batch_update_sentence_part_details(split_details['sentence_part_updates'], app_logger=app.logger)
+                        app.logger.info(f"APP: Successfully split Aeneas MP3 for article {article_id} into {split_details['num_parts']} parts. Stored in {article_mp3_parts_dir_path}.")
+                        flash(f"Audio processed (Aeneas). Original MP3 was large and split into {split_details['num_parts']} parts.", "info")
+                    elif split_details and split_details['num_parts'] == 0 and Path(converted_mp3_path_str).stat().st_size > (app.config['MAX_AUDIO_PART_SIZE_MB'] * 1024 * 1024):
+                        app.logger.warning(f"APP: Aeneas MP3 splitting failed or resulted in no parts for article {article_id}, despite being large.")
+                        db_manager.clear_article_mp3_parts_info(article_id, app_logger=app.logger)
+                        flash("Audio processed (Aeneas). Original MP3 was large, but splitting failed or produced no parts.", "warning")
+                    else: # Not large enough to split or other case
+                        app.logger.info(f"APP: Aeneas MP3 for article {article_id} not split (either too small or splitting not applicable). Clearing previous part info.")
+                        db_manager.clear_article_mp3_parts_info(article_id, app_logger=app.logger)
             
-            return bilingual_srt_generated_path_str 
+            return bilingual_srt_generated_path_str
     except Exception as e:
-        app.logger.error(f"APP: Error during audio alignment for article {article_id}: {e}", exc_info=True)
-        flash(f"An error occurred during audio processing: {str(e)}", "danger")
+        app.logger.error(f"APP: Error during AENEAS audio alignment for article {article_id}: {e}", exc_info=True)
+        flash(f"An error occurred during Aeneas audio processing: {str(e)}", "danger")
     return None
 
 
@@ -248,6 +275,7 @@ def home_redirect():
 
 @app.route('/books', methods=['GET', 'POST'])
 def list_books_page():
+    # ... (no change to this function)
     if request.method == 'POST':
         title = request.form.get('title')
         if not title or not title.strip():
@@ -272,13 +300,18 @@ def list_books_page():
 
 @app.route('/book/<int:book_id>', methods=['GET', 'POST'])
 def book_detail_page(book_id):
+    # ... (GET part and initial POST checks for book, text_file are the same) ...
     book = db_manager.get_book_by_id(book_id)
     if not book:
         flash('Book not found.', 'danger')
         app.logger.warning(f"APP: Book ID {book_id} not found for viewing.")
         return redirect(url_for('list_books_page'))
 
-    if request.method == 'POST': 
+    if request.method == 'POST':
+        # ... (text file reading and initial DB entry for article and sentences) ...
+        # This part is crucial and should be the same as your last working version
+        # up to the point of `sentences_added_count`.
+
         if 'file' not in request.files:
             flash('No text file part.', 'danger')
             return redirect(url_for('book_detail_page', book_id=book_id))
@@ -288,10 +321,14 @@ def book_detail_page(book_id):
             flash('No text file selected.', 'danger')
             return redirect(url_for('book_detail_page', book_id=book_id))
         
-        article_id_processed = None 
+        article_id_processed = None
         raw_bilingual_text_content = None
         article_title_for_db = None
         article_safe_stem_for_files = None
+        sentences_added_count = 0 # Initialize
+
+        use_tts_checked = request.form.get('use_tts') == 'true'
+        app.logger.info(f"APP: Upload for book {book_id}. TTS checkbox state: {use_tts_checked}")
 
         if text_file and allowed_text_file(text_file.filename):
             original_text_filename = text_file.filename
@@ -300,7 +337,8 @@ def book_detail_page(book_id):
             
             try:
                 raw_bilingual_text_content = text_file.stream.read().decode('utf-8')
-                text_file.stream.seek(0)
+                text_file.stream.seek(0) 
+            # ... (error handling for text file read) ...
             except UnicodeDecodeError:
                 app.logger.error(f"APP: UnicodeDecodeError for text file {original_text_filename} for book {book_id}.", exc_info=True)
                 flash('Text file not UTF-8 encoded.', 'danger')
@@ -323,9 +361,8 @@ def book_detail_page(book_id):
                 for p_idx, s_idx, en, zh in text_parser.parse_bilingual_file_content(raw_bilingual_text_content):
                     processed_text_sentences_data.append((p_idx, s_idx, en, zh))
                 
-                sentences_added_count = 0
                 if processed_text_sentences_data:
-                    sentences_added_count = db_manager.add_sentences_batch(article_id_processed, processed_text_sentences_data)
+                    sentences_added_count = db_manager.add_sentences_batch(article_id_processed, processed_text_sentences_data, app_logger=app.logger)
                 
                 if sentences_added_count > 0:
                     flash(f'Text file "{original_text_filename}" (processed as "{article_title_for_db}") for book "{book["title"]}" : {sentences_added_count} sentence pairs added.', 'success')
@@ -338,36 +375,72 @@ def book_detail_page(book_id):
                 app.logger.error(f"APP: Error processing text file {original_text_filename} (for article '{article_title_for_db}', book {book_id}): {e}", exc_info=True)
                 flash(f'Error processing text file "{original_text_filename}" for book "{book["title"]}": {str(e)}', 'danger')
                 return redirect(url_for('book_detail_page', book_id=book_id))
-        else:
+        else: 
             flash('Invalid text file type.', 'danger')
             app.logger.warning(f"APP: Invalid text file type uploaded for book {book_id}: {text_file.filename if text_file else 'None'}")
             return redirect(url_for('book_detail_page', book_id=book_id))
 
-        if article_id_processed and 'audio_file' in request.files:
-            audio_file = request.files['audio_file']
-            if audio_file and audio_file.filename != '':
-                if allowed_audio_file(audio_file.filename):
-                    if not raw_bilingual_text_content: 
-                         app.logger.error(f"APP: Internal error: Text content not available for audio processing for article ID {article_id_processed}, book {book_id}.")
-                         flash("Internal error: Text content not available for audio processing.", "danger")
-                    elif not article_safe_stem_for_files: 
-                         app.logger.error(f"APP: Internal error: Article file stem not available for audio processing for article ID {article_id_processed}, book {book_id}.")
-                         flash("Internal error: Article file stem not available for audio processing.", "danger")
-                    else:
-                        app.logger.info(f"APP: Processing audio alignment for article ID {article_id_processed} ('{article_title_for_db}') in book {book_id} using uploaded text content.")
-                        _process_audio_alignment(
-                            article_id_processed, 
-                            audio_file, 
+        # --- Audio Processing Decision ---
+        if article_id_processed and sentences_added_count > 0:
+            if use_tts_checked:
+                app.logger.info(f"APP: TTS checkbox is checked. Processing audio using TTS for article ID {article_id_processed}.")
+                # Pass the app instance (self) to audio_processor for config and logger
+                tts_result = audio_processor.process_article_with_tts(
+                    article_id_processed,
+                    raw_bilingual_text_content,
+                    article_safe_stem_for_files,
+                    app # Passing the Flask app instance
+                )
+                if tts_result and tts_result.get("message"):
+                    flash(tts_result["message"], tts_result.get("message_category", "info"))
+                # No explicit redirect here, success/failure handled by flash from tts_result
+
+            elif 'audio_file' in request.files: # TTS not checked, process uploaded audio file
+                audio_file = request.files['audio_file']
+                if audio_file and audio_file.filename != '':
+                    if allowed_audio_file(audio_file.filename):
+                        # ... (existing Aeneas call logic) ...
+                        app.logger.info(f"APP: Processing Aeneas audio alignment for article ID {article_id_processed}...")
+                        aeneas_srt_path = _process_audio_alignment(
+                            article_id_processed,
+                            audio_file,
                             raw_bilingual_text_content,
                             article_safe_stem_for_files
                         )
-                else:
-                    flash(f'Invalid audio file type: "{audio_file.filename}". Supported: {ALLOWED_AUDIO_EXTENSIONS}', 'warning')
-                    app.logger.warning(f"APP: Invalid audio file type uploaded for book {book_id}: {audio_file.filename}")
+                        # _process_audio_alignment already flashes messages
+                    else:
+                        flash(f'Invalid audio file type: "{audio_file.filename}". Supported: {ALLOWED_AUDIO_EXTENSIONS}', 'warning')
+                        app.logger.warning(f"APP: Invalid audio file type uploaded for book {book_id}: {audio_file.filename}")
+                else: 
+                    flash("No audio file uploaded and 'Use TTS' was not selected. Only text processed.", "info")
+                    app.logger.info(f"APP: Article {article_id_processed} text processed. No audio file and TTS not selected.")
+            else:
+                flash("No audio file uploaded and 'Use TTS' was not selected. Only text processed.", "info")
+                app.logger.info(f"APP: Article {article_id_processed} text processed. No audio file and TTS not selected.")
+        elif article_id_processed and sentences_added_count == 0:
+            app.logger.info(f"APP: No sentences were added for article {article_id_processed}. Skipping audio processing stage.")
+            # Flash message for no sentences already handled.
         
         return redirect(url_for('book_detail_page', book_id=book_id))
 
-    # GET request
+    # ... (GET request part of book_detail_page remains the same) ...
+    articles_for_book = []
+    currently_reading_article_id = None
+    try:
+        articles_for_book = db_manager.get_articles_for_book(book_id, app_logger=app.logger)
+        most_recent_location = db_manager.get_most_recent_reading_location_for_book(book_id, app_logger=app.logger)
+        if most_recent_location:
+            currently_reading_article_id = most_recent_location['article_id']
+    except Exception as e:
+        app.logger.error(f"APP: Error fetching articles or reading location for book ID {book_id}: {e}", exc_info=True)
+        flash(f"Could not retrieve articles or reading status for book '{book['title']}'.", "danger")
+        
+    return render_template('book_detail.html',
+                           book=book,
+                           articles=articles_for_book,
+                           currently_reading_article_id=currently_reading_article_id)
+
+    # GET request (no change to this part of the function)
     articles_for_book = []
     currently_reading_article_id = None
     try:
@@ -380,15 +453,18 @@ def book_detail_page(book_id):
         app.logger.error(f"APP: Error fetching articles or reading location for book ID {book_id}: {e}", exc_info=True)
         flash(f"Could not retrieve articles or reading status for book '{book['title']}'.", "danger")
         
-    return render_template('book_detail.html', 
-                           book=book, 
+    return render_template('book_detail.html',
+                           book=book,
                            articles=articles_for_book,
                            currently_reading_article_id=currently_reading_article_id)
 
+# ... (rest of app.py: align_audio_for_article, view_article, save_reading_location, download_mp3_for_article, serve_mp3_part) ...
+# The deferred align_audio_for_article route might also need a TTS checkbox if you want that option there too.
+# For now, it will remain Aeneas-only.
 
 @app.route('/article/<int:article_id>/align_audio', methods=['GET', 'POST'])
 def align_audio_for_article(article_id):
-    article = db_manager.get_article_by_id(article_id) 
+    article = db_manager.get_article_by_id(article_id)
     if not article:
         flash('Article not found.', 'danger')
         app.logger.warning(f"APP: Attempt to align audio for non-existent article ID: {article_id}")
@@ -396,7 +472,7 @@ def align_audio_for_article(article_id):
     
     book = db_manager.get_book_by_id(article['book_id']) if article['book_id'] else None
     
-    article_title_from_db = article['filename']
+    article_title_from_db = article['filename'] # This is the user-facing title (stem of original txt)
     article_safe_stem_for_files = secure_filename(article_title_from_db)
     
     if request.method == 'POST':
@@ -409,24 +485,30 @@ def align_audio_for_article(article_id):
             return redirect(url_for('align_audio_for_article', article_id=article_id))
 
         if audio_file and allowed_audio_file(audio_file.filename):
-            app.logger.info(f"APP: Processing deferred audio alignment for article ID {article_id} ('{article_title_from_db}'). English sentences will be fetched from DB.")
+            app.logger.info(f"APP: Processing deferred AENEAS audio alignment for article ID {article_id} ('{article_title_from_db}'). English sentences will be fetched from DB.")
+            # For deferred alignment, we pass None for original_bilingual_text_content_string
+            # _process_audio_alignment will fetch sentences from DB.
             _process_audio_alignment(
                 article_id,
                 audio_file,
-                None, 
+                None, # No raw text string needed, will pull from DB
                 article_safe_stem_for_files
             )
             return redirect(url_for('view_article', article_id=article_id))
         else:
             flash(f'Invalid audio file type: "{audio_file.filename}". Supported: {ALLOWED_AUDIO_EXTENSIONS}', 'warning')
-            app.logger.warning(f"APP: Invalid audio file type for deferred alignment: {audio_file.filename}")
+            app.logger.warning(f"APP: Invalid audio file type for deferred Aeneas alignment: {audio_file.filename}")
         return redirect(url_for('align_audio_for_article', article_id=article_id))
 
+    # GET request
     return render_template('align_audio.html', article_id=article_id, article_filename=article_title_from_db, book=book)
 
 
+# ... (view_article, save_reading_location, download_mp3_for_article, serve_mp3_part remain unchanged for now)
+
 @app.route('/article/<int:article_id>')
 def view_article(article_id):
+    # ... (no change)
     app.logger.debug(f"APP: Attempting to view article ID: {article_id}")
     article_data = db_manager.get_article_by_id(article_id) 
     if not article_data:
@@ -486,7 +568,7 @@ def view_article(article_id):
     article_audio_part_checksums_str = None
     try:
         article_audio_part_checksums_str = article_data['audio_part_checksums']
-    except KeyError: # Should not happen if column is selected, but as a fallback
+    except KeyError: 
         app.logger.warning(f"APP: 'audio_part_checksums' key missing from article_data for article {article_id}. This might indicate a DB schema issue or an old record.")
         article_audio_part_checksums_str = None
     
@@ -504,6 +586,7 @@ def view_article(article_id):
 
 @app.route('/article/<int:article_id>/save_location', methods=['POST'])
 def save_reading_location(article_id):
+    # ... (no change)
     article = db_manager.get_article_by_id(article_id)
     if not article:
         app.logger.warning(f"APP: Attempt to save reading location for non-existent article ID: {article_id}")
@@ -537,9 +620,9 @@ def save_reading_location(article_id):
         app.logger.error(f"APP: Failed to save reading location for article {article_id} (book {book_id_for_location}): {e}", exc_info=True)
         return jsonify({'status': 'error', 'message': f'Failed to save location: {str(e)}'}), 500
 
-
 @app.route('/article/<int:article_id>/download_mp3')
 def download_mp3_for_article(article_id):
+    # ... (no change)
     article = db_manager.get_article_by_id(article_id)
     if not article:
         flash('Article not found.', 'danger')
@@ -569,6 +652,7 @@ def download_mp3_for_article(article_id):
 
 @app.route('/article/<int:article_id>/serve_mp3_part/<int:part_index>')
 def serve_mp3_part(article_id, part_index):
+    # ... (no change)
     article = db_manager.get_article_by_id(article_id)
     if not article or not article['mp3_parts_folder_path'] or article['num_audio_parts'] is None or part_index < 0 or part_index >= article['num_audio_parts']: 
         app.logger.warning(f"APP: Serve MP3 part: Invalid request for article {article_id}, part {part_index}.")
@@ -600,9 +684,14 @@ if __name__ == '__main__':
        app.config['AENEAS_PYTHON_PATH'] = aeneas_path_env
     app.logger.info(f"AENEAS_PYTHON_PATH is set to: {app.config['AENEAS_PYTHON_PATH']}")
     
-    # ORIGINAL LINE:
-    # app.run(debug=True, host='0.0.0.0', port=5000) 
+    # Check Kokoro voice config one last time before run
+    if tts_utils.kokoro_available and \
+       not tts_utils.check_voices_configured(app.config['KOKORO_MANDARIN_VOICE'], app.config['KOKORO_ENGLISH_VOICE'], app.logger):
+        app.logger.warning("#####################################################################")
+        app.logger.warning("## KOKORO VOICES ARE LIKELY MISCONFIGURED IN app.py!                 ##")
+        app.logger.warning("## Please set KOKORO_MANDARIN_VOICE and KOKORO_ENGLISH_VOICE.        ##")
+        app.logger.warning("## TTS functionality will likely fail until this is corrected.       ##")
+        app.logger.warning("#####################################################################")
 
-    # MODIFIED LINE FOR AD-HOC SSL:
     app.run(debug=True, host='0.0.0.0', port=5002, ssl_context='adhoc')
     app.logger.info("Flask app is now running with ad-hoc SSL (HTTPS).")
