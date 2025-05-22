@@ -7,7 +7,7 @@ from werkzeug.utils import secure_filename
 import db_manager
 import text_parser
 import audio_processor
-import tts_utils # <-- NEW IMPORT
+import tts_utils
 
 import logging
 from logging.handlers import RotatingFileHandler
@@ -46,7 +46,7 @@ if not os.path.exists(log_dir):
     os.makedirs(log_dir)
 
 log_file = os.path.join(log_dir, 'app.log')
-file_handler = RotatingFileHandler(log_file, maxBytes=1024 * 1024 * 10, backupCount=5)
+file_handler = RotatingFileHandler(log_file, maxBytes=1024 * 1024 * 10, backupCount=5, encoding='utf-8')
 formatter = logging.Formatter(
     '%(asctime)s %(levelname)s: %(message)s [in %(pathname)s:%(lineno)d]'
 )
@@ -54,6 +54,7 @@ file_handler.setFormatter(formatter)
 file_handler.setLevel(logging.INFO) # Changed to INFO for production, DEBUG for dev
 app.logger.addHandler(file_handler)
 app.logger.setLevel(logging.INFO) # Changed to INFO
+app.logger.propagate = False 
 app.logger.info('Application startup: File logging configured.')
 
 

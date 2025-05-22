@@ -948,7 +948,7 @@ document.addEventListener('DOMContentLoaded', function() {
                 return; 
             }
             
-            stopCurrentAudio();
+            stopCurrentAudio(); // This already sets currentSourceNode to null if one was playing
 
             if (currentPlayingSentence && currentPlayingSentence !== sentenceElement) {
                 currentPlayingSentence.classList.remove('playing-sentence');
@@ -992,6 +992,8 @@ document.addEventListener('DOMContentLoaded', function() {
             currentSourceNode.buffer = audioBuffer;
             currentSourceNode.connect(audioContext.destination);
             
+            const thisSourceNodeForOnEnded = currentSourceNode; // Capture for the onended closure
+
             try {
                 currentSourceNode.start(0, offsetInSeconds, durationToPlay); 
             } catch (e) {
@@ -1002,10 +1004,21 @@ document.addEventListener('DOMContentLoaded', function() {
                 return;
             }
             
-            currentSourceNode.onended = () => {
+            thisSourceNodeForOnEnded.onended = () => {
+                // Only modify state if this 'onended' is for the node we currently think is playing
+                if (currentSourceNode === thisSourceNodeForOnEnded) {
+                    currentSourceNode = null; // *** THIS IS THE KEY FIX ***
+                }
+
+                // Remove playing class if it's the sentence that just finished
                 if (currentPlayingSentence === sentenceElement) { 
                     currentPlayingSentence.classList.remove('playing-sentence');
+                    // Optional: currentPlayingSentence = null; 
+                    // This would mean that after playing, no sentence is considered "currentPlayingSentence"
+                    // For now, let's rely on currentSourceNode being null.
                 }
+
+                // Update the menu icon if the menu is visible and for the correct sentence
                 if (contextualMenu.style.display === 'block' && highlightedSentence === sentenceElement) {
                     const audioButtonIcon = contextualMenu.querySelector('.contextual-menu-item[data-action="play-pause-audio"] .menu-icon');
                     if (audioButtonIcon) audioButtonIcon.textContent = "▶️";
@@ -1018,11 +1031,11 @@ document.addEventListener('DOMContentLoaded', function() {
         function stopCurrentAudio() {
             if (currentSourceNode) {
                 try { 
-                    currentSourceNode.onended = null; 
+                    currentSourceNode.onended = null; // Important to remove old onended handler
                     currentSourceNode.stop(); 
                     currentSourceNode.disconnect();
-                } catch (e) { /* ignore */ }
-                currentSourceNode = null;
+                } catch (e) { /* ignore errors if node is already stopped or disconnected */ }
+                currentSourceNode = null; // Ensure it's nulled
             }
         }
     } else {
