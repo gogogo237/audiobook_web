@@ -2,12 +2,13 @@ import os
 import tempfile
 import shutil
 from pathlib import Path
-from flask import Flask, render_template, request, redirect, url_for, flash, jsonify, send_from_directory
+from flask import Flask, render_template, request, redirect, url_for, flash, jsonify, send_from_directory, after_this_request, send_file
 from werkzeug.utils import secure_filename
 import db_manager
 import text_parser
 import audio_processor
 import tts_utils
+import book_exporter # New import
 
 import logging
 from logging.handlers import RotatingFileHandler
@@ -454,6 +455,83 @@ def book_detail_page(book_id):
                            book=book,
                            articles=articles_for_book,
                            currently_reading_article_id=currently_reading_article_id)
+
+
+@app.route('/book/<int:book_id>/export', methods=['GET'])
+def export_book_route(book_id):
+    app.logger.info(f"APP: Received request to export book_id: {book_id}")
+
+    book = db_manager.get_book_by_id(book_id, app_logger=app.logger)
+    if not book:
+        flash('Book not found, cannot export.', 'danger')
+        app.logger.warning(f"APP: Export failed. Book_id {book_id} not found.")
+        return redirect(request.referrer or url_for('list_books_page'))
+
+    book_title = book['title']
+    safe_book_title = secure_filename(book_title) if book_title else "untitled_book"
+    download_filename = f"{safe_book_title}.bookpkg"
+
+    if not os.path.exists(app.config['TEMP_FILES_FOLDER']):
+        try:
+            os.makedirs(app.config['TEMP_FILES_FOLDER'])
+            app.logger.info(f"APP: Created TEMP_FILES_FOLDER as it did not exist: {app.config['TEMP_FILES_FOLDER']}")
+        except OSError as e:
+            app.logger.error(f"APP: Failed to create TEMP_FILES_FOLDER '{app.config['TEMP_FILES_FOLDER']}': {e}. Cannot proceed with export.")
+            flash('Temporary file directory is missing and could not be created. Export failed.', 'danger')
+            return redirect(url_for('book_detail_page', book_id=book_id))
+
+    temp_pkg_file_path = None
+    try:
+        fd, temp_pkg_file_path = tempfile.mkstemp(suffix='.bookpkg', prefix=f"{safe_book_title}_", dir=app.config['TEMP_FILES_FOLDER'])
+        os.close(fd)
+        app.logger.info(f"APP: Temporary package file path for export: {temp_pkg_file_path}")
+
+        success = book_exporter.create_book_package(
+            book_id,
+            temp_pkg_file_path,
+            app.logger,
+            app.config['TEMP_FILES_FOLDER']
+        )
+
+        if success:
+            app.logger.info(f"APP: Successfully created package for book_id {book_id} at {temp_pkg_file_path}. Sending file...")
+
+            @after_this_request
+            def cleanup_package_file(response):
+                try:
+                    if os.path.exists(temp_pkg_file_path):
+                        os.remove(temp_pkg_file_path)
+                        app.logger.info(f"APP: Cleaned up temporary package file: {temp_pkg_file_path}")
+                except Exception as e_cleanup:
+                    app.logger.error(f"APP: Error cleaning up temporary package file {temp_pkg_file_path}: {e_cleanup}")
+                return response
+
+            return send_file(
+                temp_pkg_file_path,
+                as_attachment=True,
+                download_name=download_filename,
+                mimetype='application/zip'
+            )
+        else:
+            app.logger.error(f"APP: Export failed for book_id {book_id}. create_book_package returned False.")
+            flash(f'Failed to create book package for "{book_title}". Check logs for details.', 'danger')
+            return redirect(url_for('book_detail_page', book_id=book_id))
+
+    except Exception as e:
+        app.logger.error(f"APP: Unexpected error during export of book_id {book_id}: {e}", exc_info=True)
+        flash('An unexpected error occurred during book export. Please try again later.', 'danger')
+        return redirect(url_for('book_detail_page', book_id=book_id))
+    finally:
+        # Check if temp_pkg_file_path was created and if 'success' variable exists and is False,
+        # or if 'cleanup_package_file' was not defined (meaning an error before send_file).
+        if temp_pkg_file_path and os.path.exists(temp_pkg_file_path):
+            # A more precise check to avoid deleting if send_file is about to happen or has happened
+            if not ('success' in locals() and success and 'cleanup_package_file' in locals()):
+                 try:
+                    os.remove(temp_pkg_file_path)
+                    app.logger.info(f"APP: Cleaned up temporary package file in finally block: {temp_pkg_file_path}")
+                 except Exception as e_final_cleanup:
+                    app.logger.error(f"APP: Error in finally block cleaning up {temp_pkg_file_path}: {e_final_cleanup}")
 
 
 @app.route('/article/<int:article_id>/align_audio', methods=['GET', 'POST'])

@@ -18,6 +18,13 @@
 
 {% block content %}
     <h1>Book: {{ book.title }}</h1>
+
+    {# NEW EXPORT LINK/BUTTON #}
+    <div style="margin-top: 10px; margin-bottom: 10px;">
+        <a href="{{ url_for('export_book_route', book_id=book.id) }}" class="btn btn-primary">Export Book (.bookpkg)</a>
+    </div>
+    {# END NEW EXPORT LINK/BUTTON #}
+
     <p><a href="{{ url_for('list_books_page') }}">« Back to All Books</a></p>
 
     <h2>Articles in "{{ book.title }}"</h2>
