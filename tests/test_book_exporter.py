@@ -23,7 +23,7 @@ class TestBookExporter(unittest.TestCase):
         self.dummy_audio_content = b"dummy audio data"
         self.dummy_audio_source_dir = os.path.join(self.temp_dir, "original_audio_files") # Where dummy source audio lives
         os.makedirs(self.dummy_audio_source_dir, exist_ok=True)
-
+        
         self.article1_orig_audio_name = "article1_source_audio.mp3"
         self.dummy_article1_audio_path = os.path.join(self.dummy_audio_source_dir, self.article1_orig_audio_name)
         with open(self.dummy_article1_audio_path, 'wb') as f:
@@ -54,7 +54,7 @@ class TestBookExporter(unittest.TestCase):
         self.assertEqual(article1_manifest['_original_converted_mp3_path_internal'], self.dummy_article1_audio_path)
         article3_manifest = manifest['articles'][2] # Audio path points to non_existent_audio.mp3
         # So os.path.exists(article_row['converted_mp3_path']) in generate_manifest_data should be false
-        self.assertIsNone(article3_manifest['audio_file_path'])
+        self.assertIsNone(article3_manifest['audio_file_path']) 
 
 
     @patch('book_exporter.db_manager')
@@ -71,7 +71,7 @@ class TestBookExporter(unittest.TestCase):
         self.assertIsNotNone(manifest)
         self.assertEqual(len(manifest['articles']), 0)
 
-    @patch('book_exporter.generate_manifest_data')
+    @patch('book_exporter.generate_manifest_data') 
     def test_create_book_package_success(self, mock_generate_manifest):
         book_id = 1
         output_package_path = os.path.join(self.temp_dir, "test_book.bookpkg")
@@ -81,7 +81,7 @@ class TestBookExporter(unittest.TestCase):
             "articles": [
                 {
                     "article_title": "Audio Article 1", "article_id_original": 101,
-                    "audio_file_path": "articles/Audio_Article_1/audio.mp3",
+                    "audio_file_path": "articles/Audio_Article_1/audio.mp3", 
                     "_article_safe_title_internal": "Audio_Article_1",
                     "_original_converted_mp3_path_internal": self.dummy_article1_audio_path, # Valid, existing path
                     "sentences": [{"english_text": "Sentence 1", "chinese_text": "句子1"}]
@@ -91,9 +91,9 @@ class TestBookExporter(unittest.TestCase):
                     "audio_file_path": None, "_article_safe_title_internal": "No_Audio_Article",
                     "_original_converted_mp3_path_internal": None, "sentences": []
                 },
-                {
+                { 
                     "article_title": "Audio Source Missing", "article_id_original": 103,
-                    "audio_file_path": "articles/Audio_Source_Missing/audio.mp3",
+                    "audio_file_path": "articles/Audio_Source_Missing/audio.mp3", 
                     "_article_safe_title_internal": "Audio_Source_Missing",
                     "_original_converted_mp3_path_internal": os.path.join(self.dummy_audio_source_dir, "non_existent.mp3"),
                     "sentences": []
@@ -107,12 +107,12 @@ class TestBookExporter(unittest.TestCase):
 
         self.assertTrue(result)
         mock_generate_manifest.assert_called_once_with(book_id, self.app_logger_mock)
-
+        
         self.assertTrue(os.path.exists(output_package_path))
         with zipfile.ZipFile(output_package_path, 'r') as zf:
             zip_contents = zf.namelist()
             self.assertIn("manifest.json", zip_contents)
-            self.assertIn("articles/Audio_Article_1/audio.mp3", zip_contents)
+            self.assertIn("articles/Audio_Article_1/audio.mp3", zip_contents) 
             self.assertNotIn("articles/No_Audio_Article/audio.mp3", zip_contents)
             self.assertNotIn("articles/Audio_Source_Missing/audio.mp3", zip_contents)
 
@@ -121,7 +121,7 @@ class TestBookExporter(unittest.TestCase):
                 self.assertEqual(manifest_in_zip['book_title'], "Test Book Package")
                 self.assertEqual(len(manifest_in_zip['articles']), 3)
                 self.assertNotIn('_article_safe_title_internal', manifest_in_zip['articles'][0])
-
+        
         found_warning_log = False
         for call_item in self.app_logger_mock.warning.call_args_list:
             args, _ = call_item
@@ -131,13 +131,13 @@ class TestBookExporter(unittest.TestCase):
         self.assertTrue(found_warning_log, "Expected warning log for missing audio source not found.")
 
 
-    @patch('book_exporter.generate_manifest_data', return_value=None)
+    @patch('book_exporter.generate_manifest_data', return_value=None) 
     def test_create_book_package_manifest_generation_fails(self, mock_generate_manifest):
         result = book_exporter.create_book_package(1, "dummy.bookpkg", self.app_logger_mock, self.temp_files_base_for_pkg_creation)
         self.assertFalse(result)
 
     @patch('book_exporter.generate_manifest_data')
-    @patch('shutil.copy2', side_effect=Exception("Disk full test error"))
+    @patch('shutil.copy2', side_effect=Exception("Disk full test error")) 
     def test_create_book_package_audio_copy_fails(self, mock_shutil_copy, mock_generate_manifest):
         book_id = 1
         output_package_path = os.path.join(self.temp_dir, "copy_fail.bookpkg")
@@ -147,7 +147,7 @@ class TestBookExporter(unittest.TestCase):
                 "article_title": "Audio Article", "article_id_original": 101,
                 "audio_file_path": "articles/Audio_Article/audio.mp3",
                 "_article_safe_title_internal": "Audio_Article",
-                "_original_converted_mp3_path_internal": self.dummy_article1_audio_path,
+                "_original_converted_mp3_path_internal": self.dummy_article1_audio_path, 
                 "sentences": []
             }]
         }
@@ -155,7 +155,7 @@ class TestBookExporter(unittest.TestCase):
         self.assertTrue(os.path.exists(self.dummy_article1_audio_path))
 
         result = book_exporter.create_book_package(book_id, output_package_path, self.app_logger_mock, self.temp_files_base_for_pkg_creation)
-        self.assertTrue(result)
+        self.assertTrue(result) 
         mock_shutil_copy.assert_called_once()
 
         found_error_log = False
@@ -183,23 +183,23 @@ class TestBookExporter(unittest.TestCase):
             mock_gen_manifest.return_value = {"book_title": "Test", "book_id_original": 1, "articles": []}
             result = book_exporter.create_book_package(1, "dummy.bookpkg", self.app_logger_mock, uncreatable_temp_base)
             self.assertFalse(result)
-
+            
             found_error_log = False
             # This error is caught by the general "except Exception as e" block in create_book_package,
             # because os.makedirs is skipped (path exists as a file), and tempfile.mkdtemp fails.
-            expected_log_part1 = f"Error during package creation for book_id {1}"
+            expected_log_part1 = f"Error during package creation for book_id {1}" 
             expected_log_part2 = "[Errno 20] Not a directory" # Or similar, depending on OS for NotADirectoryError
             expected_log_part3 = uncreatable_temp_base # The path of the problematic file/directory argument
 
             for call_item in self.app_logger_mock.error.call_args_list:
-                args, kwargs = call_item
+                args, kwargs = call_item 
                 logged_message = args[0]
                 logged_exc_info = kwargs.get('exc_info', False)
 
                 if expected_log_part1 in logged_message and \
                    expected_log_part2 in logged_message and \
                    expected_log_part3 in logged_message and \
-                   logged_exc_info is True:
+                   logged_exc_info is True: 
                     found_error_log = True
                     break
             self.assertTrue(found_error_log, f"Expected error log for mkdtemp failure not found or message mismatch. Log calls: {self.app_logger_mock.error.call_args_list}")

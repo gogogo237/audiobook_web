@@ -18,7 +18,7 @@
 
 {% block content %}
     <h1>Book: {{ book.title }}</h1>
-
+    
     {# NEW EXPORT LINK/BUTTON #}
     <div style="margin-top: 10px; margin-bottom: 10px;">
         <a href="{{ url_for('export_book_route', book_id=book.id) }}" class="btn btn-primary">Export Book (.bookpkg)</a>
@@ -48,6 +48,12 @@
                     {% if currently_reading_article_id and article_item.id == currently_reading_article_id %}
                         <strong style="color: #28a745; margin-left: 5px;">(currently reading)</strong>
                     {% endif %}
+
+        {# NEW DELETE BUTTON/FORM - added inline for simplicity #}
+        <form method="POST" action="{{ url_for('delete_article_route', article_id=article_item.id) }}" style="display: inline; margin-left: 10px;" onsubmit="return confirm('Are you sure you want to delete the article \'{{ article_item.filename | e }}\' and all its associated data? This action cannot be undone.');">
+            <input type="submit" value="Delete" class="btn btn-danger btn-sm" style="padding: 0.1rem 0.3rem; font-size: 0.8em;">
+        </form>
+        {# END NEW DELETE BUTTON/FORM #}
                 </li>
             {% endfor %}
         </ul>

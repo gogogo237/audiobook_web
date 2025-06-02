@@ -460,7 +460,7 @@ def book_detail_page(book_id):
 @app.route('/book/<int:book_id>/export', methods=['GET'])
 def export_book_route(book_id):
     app.logger.info(f"APP: Received request to export book_id: {book_id}")
-
+    
     book = db_manager.get_book_by_id(book_id, app_logger=app.logger)
     if not book:
         flash('Book not found, cannot export.', 'danger')
@@ -470,7 +470,7 @@ def export_book_route(book_id):
     book_title = book['title']
     safe_book_title = secure_filename(book_title) if book_title else "untitled_book"
     download_filename = f"{safe_book_title}.bookpkg"
-
+    
     if not os.path.exists(app.config['TEMP_FILES_FOLDER']):
         try:
             os.makedirs(app.config['TEMP_FILES_FOLDER'])
@@ -479,23 +479,23 @@ def export_book_route(book_id):
             app.logger.error(f"APP: Failed to create TEMP_FILES_FOLDER '{app.config['TEMP_FILES_FOLDER']}': {e}. Cannot proceed with export.")
             flash('Temporary file directory is missing and could not be created. Export failed.', 'danger')
             return redirect(url_for('book_detail_page', book_id=book_id))
-
-    temp_pkg_file_path = None
+    
+    temp_pkg_file_path = None 
     try:
         fd, temp_pkg_file_path = tempfile.mkstemp(suffix='.bookpkg', prefix=f"{safe_book_title}_", dir=app.config['TEMP_FILES_FOLDER'])
-        os.close(fd)
+        os.close(fd) 
         app.logger.info(f"APP: Temporary package file path for export: {temp_pkg_file_path}")
 
         success = book_exporter.create_book_package(
             book_id,
-            temp_pkg_file_path,
+            temp_pkg_file_path, 
             app.logger,
-            app.config['TEMP_FILES_FOLDER']
+            app.config['TEMP_FILES_FOLDER'] 
         )
 
         if success:
             app.logger.info(f"APP: Successfully created package for book_id {book_id} at {temp_pkg_file_path}. Sending file...")
-
+            
             @after_this_request
             def cleanup_package_file(response):
                 try:
@@ -510,7 +510,7 @@ def export_book_route(book_id):
                 temp_pkg_file_path,
                 as_attachment=True,
                 download_name=download_filename,
-                mimetype='application/zip'
+                mimetype='application/zip' 
             )
         else:
             app.logger.error(f"APP: Export failed for book_id {book_id}. create_book_package returned False.")
@@ -599,8 +599,80 @@ def align_audio_for_article(article_id):
     # GET request
     return render_template('align_audio.html', article_id=article_id, article_filename=article_title_from_db, book=book)
 
+@app.route('/article/<int:article_id>/delete', methods=['POST'])
+def delete_article_route(article_id):
+    app.logger.info(f"APP: Received POST request to delete article_id: {article_id}")
 
-# ... (view_article, save_reading_location, download_mp3_for_article, serve_mp3_part remain unchanged)
+    article_to_delete = db_manager.get_article_by_id(article_id, app_logger=app.logger)
+
+    if not article_to_delete:
+        flash(f"Article with ID {article_id} not found. Cannot delete.", 'danger')
+        app.logger.warning(f"APP: Delete failed. Article_id {article_id} not found in DB.")
+        # Try to redirect to referrer or a default page
+        return redirect(request.referrer or url_for('list_books_page'))
+
+    book_id_for_redirect = article_to_delete['book_id']
+    article_filename_for_flash = article_to_delete['filename'] # For user message
+
+    # --- File System Cleanup ---
+    app.logger.info(f"APP: Starting file system cleanup for article_id: {article_id} ('{article_filename_for_flash}')")
+    
+    # --- MODIFIED LINES ---
+    paths_to_clean = {
+        "Converted MP3": article_to_delete['converted_mp3_path'] if 'converted_mp3_path' in article_to_delete.keys() else None,
+        "Processed SRT": article_to_delete['processed_srt_path'] if 'processed_srt_path' in article_to_delete.keys() else None,
+    }
+    mp3_parts_folder = article_to_delete['mp3_parts_folder_path'] if 'mp3_parts_folder_path' in article_to_delete.keys() else None
+    # --- END MODIFIED LINES ---
+
+
+    for description, file_path_str in paths_to_clean.items():
+        if file_path_str:
+            file_path_obj = Path(file_path_str) # Use Path for easier checks
+            if file_path_obj.exists() and file_path_obj.is_file():
+                try:
+                    os.remove(file_path_obj)
+                    app.logger.info(f"APP: Successfully deleted {description} file: {file_path_obj}")
+                except OSError as e:
+                    app.logger.error(f"APP: Error deleting {description} file {file_path_obj}: {e}")
+            elif file_path_str: # Path string was not empty but file doesn't exist
+                 app.logger.info(f"APP: {description} file not found at {file_path_str}, skipping deletion.")
+        else:
+            app.logger.info(f"APP: No path for {description}, skipping deletion.")
+
+
+    if mp3_parts_folder:
+        folder_path_obj = Path(mp3_parts_folder)
+        if folder_path_obj.exists() and folder_path_obj.is_dir():
+            try:
+                shutil.rmtree(folder_path_obj)
+                app.logger.info(f"APP: Successfully deleted MP3 parts folder: {folder_path_obj}")
+            except OSError as e:
+                app.logger.error(f"APP: Error deleting MP3 parts folder {folder_path_obj}: {e}")
+        elif mp3_parts_folder: # Path string was not empty but folder doesn't exist
+             app.logger.info(f"APP: MP3 parts folder not found at {mp3_parts_folder}, skipping deletion.")
+    else:
+        app.logger.info("APP: No MP3 parts folder path for this article, skipping folder deletion.")
+    
+    app.logger.info(f"APP: File system cleanup finished for article_id: {article_id}.")
+
+    # --- Database Deletion ---
+    app.logger.info(f"APP: Proceeding to delete article_id: {article_id} from database.")
+    db_deletion_successful = db_manager.delete_article(article_id, app_logger=app.logger)
+
+    if db_deletion_successful:
+        flash(f"Article '{article_filename_for_flash}' (ID: {article_id}) and its associated files/data have been deleted.", 'success')
+        app.logger.info(f"APP: Successfully deleted article_id: {article_id} from database and cleaned files.")
+    else:
+        flash(f"Failed to delete article '{article_filename_for_flash}' (ID: {article_id}) from the database. Some files might have been removed. Check logs.", 'danger')
+        app.logger.error(f"APP: Database deletion failed for article_id: {article_id} after file cleanup.")
+
+    if book_id_for_redirect:
+        return redirect(url_for('book_detail_page', book_id=book_id_for_redirect))
+    else:
+        # Fallback if book_id was somehow not associated (should not happen with current schema)
+        app.logger.warning(f"APP: No book_id found for redirect after deleting article {article_id}. Redirecting to book list.")
+        return redirect(url_for('list_books_page'))
 
 @app.route('/article/<int:article_id>')
 def view_article(article_id):

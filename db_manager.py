@@ -714,6 +714,43 @@ def get_most_recent_reading_location_for_book(book_id, app_logger=None):
     finally:
         if conn: conn.close()
 
+def delete_article(article_id, app_logger=None):
+    logger = app_logger if app_logger else default_logger
+    conn = get_db_connection()
+    try:
+        cursor = conn.cursor()
+        logger.info(f"DB: Attempting to delete article_id: {article_id} and its related data.")
+
+        # 1. Delete associated sentences.
+        cursor.execute("DELETE FROM sentences WHERE article_id = ?", (article_id,))
+        logger.info(f"DB: Deleted sentences for article_id: {article_id}. Rows affected: {cursor.rowcount}")
+
+        # 2. Delete associated reading locations.
+        cursor.execute("DELETE FROM reading_locations WHERE article_id = ?", (article_id,))
+        logger.info(f"DB: Deleted reading locations for article_id: {article_id}. Rows affected: {cursor.rowcount}")
+
+        # 3. Delete the article itself.
+        cursor.execute("DELETE FROM articles WHERE id = ?", (article_id,))
+        article_deleted_count = cursor.rowcount
+        logger.info(f"DB: Deleted article entry for article_id: {article_id}. Rows affected: {article_deleted_count}")
+
+        if article_deleted_count == 0:
+            logger.warning(f"DB: Article with article_id: {article_id} was not found for deletion in 'articles' table.")
+
+        conn.commit()
+        logger.info(f"DB: Successfully committed deletions for article_id: {article_id}.")
+        return True
+
+    except sqlite3.Error as e:
+        logger.error(f"DB: Error during deletion of article_id {article_id}: {e}", exc_info=True)
+        if conn:
+            conn.rollback()
+            logger.info(f"DB: Rolled back transaction for article_id: {article_id} due to error.")
+        return False
+    finally:
+        if conn:
+            conn.close()
+
 if __name__ == '__main__':
     print(f"Standalone DB Manager: Initializing database at: {DATABASE_PATH}")
     class DummyApp:

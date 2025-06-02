@@ -30,9 +30,9 @@ def generate_manifest_data(book_id, app_logger):
 
     for article_row in articles_from_db:
         article_id = article_row['id']
-        original_article_title = article_row['filename']
+        original_article_title = article_row['filename'] 
         article_safe_title = secure_filename(original_article_title)
-
+        
         relative_audio_path = None
         if article_row['converted_mp3_path'] and os.path.exists(article_row['converted_mp3_path']):
             relative_audio_path = f"articles/{article_safe_title}/audio.mp3"
@@ -47,15 +47,15 @@ def generate_manifest_data(book_id, app_logger):
             "article_id_original": article_id,
             "audio_file_path": relative_audio_path,
             # Temporary fields for create_book_package to use:
-            "_article_safe_title_internal": article_safe_title,
+            "_article_safe_title_internal": article_safe_title, 
             "_original_converted_mp3_path_internal": article_row['converted_mp3_path'],
             "sentences": []
         }
-
+        
         sentences_from_db = db_manager.get_sentences_for_article(article_id, app_logger=app_logger)
         if not sentences_from_db:
             app_logger.warning(f"BOOK_EXPORTER: No sentences found for article_id: {article_id} ('{original_article_title}').")
-
+        
         for sentence_row in sentences_from_db:
             sentence_data = {
                 "paragraph_index": sentence_row['paragraph_index'],
@@ -66,7 +66,7 @@ def generate_manifest_data(book_id, app_logger):
                 "end_time_ms": sentence_row['end_time_ms']
             }
             article_data_for_manifest["sentences"].append(sentence_data)
-
+        
         manifest["articles"].append(article_data_for_manifest)
 
     app_logger.info(f"BOOK_EXPORTER: Successfully generated manifest data for book_id: {book_id}")
@@ -77,7 +77,7 @@ def create_book_package(book_id, output_package_path, app_logger, temp_files_bas
     Creates a .bookpkg zip archive for the given book_id.
     '''
     app_logger.info(f"BOOK_EXPORTER: Starting package creation for book_id: {book_id} -> {output_package_path}")
-
+    
     manifest_data = generate_manifest_data(book_id, app_logger)
     if manifest_data is None:
         app_logger.error(f"BOOK_EXPORTER: Failed to generate manifest data for book_id: {book_id}. Aborting package creation.")
@@ -92,7 +92,7 @@ def create_book_package(book_id, output_package_path, app_logger, temp_files_bas
         except OSError as e:
             app_logger.error(f"BOOK_EXPORTER: Could not create temp_files_base_folder '{temp_files_base_folder}': {e}. Aborting.")
             return False
-
+            
     temp_package_dir = None
     try:
         temp_package_dir = tempfile.mkdtemp(dir=temp_files_base_folder, prefix=f"bookpkg_{book_id}_")
@@ -117,7 +117,7 @@ def create_book_package(book_id, output_package_path, app_logger, temp_files_bas
 
         # Create articles directory and copy audio files
         articles_base_dir_in_temp = os.path.join(temp_package_dir, "articles")
-
+        
         for article_data in manifest_data["articles"]: # Use original manifest_data with internal fields
             if article_data["audio_file_path"]: # This implies _original_converted_mp3_path_internal exists and file was found
                 article_safe_title = article_data["_article_safe_title_internal"]
@@ -130,9 +130,9 @@ def create_book_package(book_id, output_package_path, app_logger, temp_files_bas
                 article_specific_dir_in_temp = os.path.join(articles_base_dir_in_temp, article_safe_title)
                 if not os.path.exists(article_specific_dir_in_temp):
                     os.makedirs(article_specific_dir_in_temp)
-
+                
                 destination_audio_path_in_temp = os.path.join(article_specific_dir_in_temp, "audio.mp3")
-
+                
                 try:
                     shutil.copy2(original_audio_full_path, destination_audio_path_in_temp)
                     app_logger.info(f"BOOK_EXPORTER: Copied audio for '{article_safe_title}' to {destination_audio_path_in_temp}")
@@ -151,7 +151,7 @@ def create_book_package(book_id, output_package_path, app_logger, temp_files_bas
                     # arcname should be relative to temp_package_dir
                     arcname = os.path.relpath(file_path_abs, temp_package_dir)
                     zf.write(file_path_abs, arcname)
-
+        
         app_logger.info(f"BOOK_EXPORTER: Successfully created book package: {output_package_path}")
         return True
 
