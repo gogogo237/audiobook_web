@@ -4,7 +4,7 @@
 
 {% block head_extra %}
 <style>
-    /* ... (previous styles for audiobook-controls, download-mp3-button, playing-sentence, highlighted-sentence, audio#audioPlayer remain the same) ... */
+    /* Styles from your original article.html <style> block */
     .audiobook-controls {
         margin-bottom: 15px;
         padding: 10px;
@@ -40,17 +40,16 @@
         border-color: #398439;
     }
     .playing-sentence {
-        background-color: #cce5ff;
+        background-color: #cce5ff; /* Light blue for actively playing */
     }
     .highlighted-sentence {
-        background-color: #ffe0b2;
+        background-color: #ffe0b2; /* Orange/yellow for selected/focused */
     }
     audio#audioPlayer {
         display: none; 
         width: 100%;
         margin-top: 10px;
     }
-
 
     /* Contextual Menu Styles - Enhanced */
     #contextual-menu {
@@ -81,12 +80,12 @@
         color: #007bff; 
     }
     .contextual-menu-item .menu-icon { 
-        margin-right: 0px; /* Adjusted to 0px, text used for menu item name */
+        margin-right: 0px; 
         line-height: 1; 
     }
      .contextual-menu-item .menu-text {
-        margin-left: 8px; /* Space between icon and text */
-        font-size: 0.7em; /* Smaller text for menu item name */
+        margin-left: 8px; 
+        font-size: 0.7em; 
         vertical-align: middle;
     }
     
@@ -167,7 +166,6 @@
         background-color: #117a8b;
     }
 
-
     /* Restore Location Button Style */
     #restoreLocationButton {
         display: none; /* Hidden by default, shown by JS if location exists */
@@ -201,7 +199,7 @@
         vertical-align: middle;
     }
     #loadSelectedAudioPartButton, #downloadSelectedAudioPartButton, #switchToPartsViewButton, #switchToFullViewButton,
-    #loadLocalAudioPartButton { /* Added new button */
+    #loadLocalAudioPartButton { 
         padding: 6px 12px;
         background-color: #007bff;
         color: white;
@@ -213,13 +211,40 @@
         margin-bottom: 5px;
     }
     #loadSelectedAudioPartButton:hover, #downloadSelectedAudioPartButton:hover, #switchToPartsViewButton:hover, #switchToFullViewButton:hover,
-    #loadLocalAudioPartButton:hover { /* Added new button hover */
+    #loadLocalAudioPartButton:hover { 
         background-color: #0056b3;
     }
     #audio-part-selector-playback, #audio-part-selector-download {
         margin-bottom: 10px; /* Space before the button */
     }
+    #gamepad-status-emoji {
+        position: fixed;
+        bottom: 10px; /* Adjust as needed */
+        left: 10px;   /* Adjust as needed */
+        font-size: 1.8em; /* Adjust emoji size */
+        padding: 5px;
+        background-color: rgba(255, 255, 255, 0.0); /* Transparent background initially */
+        border-radius: 50%;
+        width: 30px;  /* Approximate, adjust with font-size and padding for centering */
+        height: 30px; /* Approximate */
+        line-height: 30px; /* For vertical centering of emoji */
+        text-align: center; /* For horizontal centering of emoji */
+        cursor: default;
+        z-index: 1005;
+        transition: color 0.3s ease-in-out, background-color 0.3s ease-in-out; /* Smooth color transition */
+        color: #AAAAAA; /* Default: Disconnected color */
+    }
 
+    #gamepad-status-emoji.connected {
+        color: #4CAF50; /* Green for connected */
+        /* background-color: rgba(76, 175, 80, 0.1); Optional subtle green background */
+    }
+
+    #gamepad-status-emoji.error {
+        color: #F44336; /* Red for error */
+        /* background-color: rgba(244, 67, 54, 0.1); Optional subtle red background */
+    }
+    /* End NEW styles for gamepad EMOJI icon */
 </style>
 {% endblock %}
 
@@ -238,14 +263,23 @@
     <button id="goToTopButton" title="Go to Top">⬆️</button> 
     <button id="goBackButton" title="Go Back to Highlighted Sentence">⬇️</button> 
     
-    <div id="python-debug-info" style="display:none;">
-        Python `has_timestamps`: {{ has_timestamps|tojson }}
-        Python `article.converted_mp3_path`: {{ article.converted_mp3_path|tojson }}
-        Python `article.mp3_parts_folder_path`: {{ article.mp3_parts_folder_path|tojson }}
-        Python `article.num_audio_parts`: {{ article.num_audio_parts|tojson }}
-        Python `reading_location`: {{ reading_location|tojson }}
-        Python `article_audio_part_checksums`: {{ article_audio_part_checksums|tojson }}
-    </div>
+    {# --- JSON Data Island for JavaScript --- #}
+    <script id="article-data-json" type="application/json">
+        {{
+            {
+                "articleId": article.id,
+                "hasTimestamps": has_timestamps,
+                "convertedMp3Path": article.converted_mp3_path,
+                "mp3PartsFolderPath": article.mp3_parts_folder_path,
+                "numAudioParts": article.num_audio_parts if article.num_audio_parts is not none else 0,
+                "initialReadingLocation": reading_location,
+                "articleAudioPartChecksums": article_audio_part_checksums
+            } | tojson | safe
+        }}
+    </script>
+    {# --- END NEW --- #}
+    <div id="gamepad-status-emoji" title="No Gamepad Connected">🎮</div>
+
 
     {% if article.mp3_parts_folder_path and article.num_audio_parts and article.num_audio_parts > 0 %}
         <button id="switchToPartsViewButton">Switch to Audio Parts View</button>
@@ -340,947 +374,5 @@
 
 
 {% block scripts %}
-<script>
-document.addEventListener('DOMContentLoaded', function() {
-    let pythonHasTimestamps = false;
-    let pythonConvertedMp3Path = null;
-    let pythonMp3PartsFolderPath = null;
-    let pythonNumAudioParts = 0;
-    let pythonArticleAudioPartChecksums = null; // For concatenated checksum string
-    let expectedChecksumsArray = []; // Parsed array of checksums
-    const AUDIO_PART_CHECKSUM_DELIMITER_JS = ";"; // Must match db_manager.py
-
-    let initialReadingLocation = null; 
-    const articleId = {{ article.id }};
-
-    try {
-        const debugInfoElement = document.getElementById('python-debug-info');
-        if (debugInfoElement) {
-            const textContent = debugInfoElement.textContent;
-            // ... (existing parsing for other python vars)
-            const hasTimestampsMatch = textContent.match(/`has_timestamps`:\s*([^\n`]+)/);
-            if (hasTimestampsMatch && hasTimestampsMatch[1]) {
-                pythonHasTimestamps = JSON.parse(hasTimestampsMatch[1].trim());
-            }
-            const mp3PathMatch = textContent.match(/`article.converted_mp3_path`:\s*([^\n`]+)/);
-            if (mp3PathMatch && mp3PathMatch[1]) {
-                pythonConvertedMp3Path = JSON.parse(mp3PathMatch[1].trim());
-            }
-            const partsPathMatch = textContent.match(/`article.mp3_parts_folder_path`:\s*([^\n`]+)/);
-            if (partsPathMatch && partsPathMatch[1]) {
-                pythonMp3PartsFolderPath = JSON.parse(partsPathMatch[1].trim());
-            }
-            const numPartsMatch = textContent.match(/`article.num_audio_parts`:\s*([^\n`]+)/);
-            if (numPartsMatch && numPartsMatch[1]) {
-                const parsedNum = JSON.parse(numPartsMatch[1].trim());
-                pythonNumAudioParts = parsedNum === null ? 0 : parseInt(parsedNum, 10);
-            }
-            const readingLocationMatch = textContent.match(/`reading_location`:\s*([^\n`]+)/);
-            if (readingLocationMatch && readingLocationMatch[1]) {
-                initialReadingLocation = JSON.parse(readingLocationMatch[1].trim());
-            }
-            const checksumsMatch = textContent.match(/`article_audio_part_checksums`:\s*([^\n`]+)/);
-            if (checksumsMatch && checksumsMatch[1]) {
-                const rawChecksumsStr = JSON.parse(checksumsMatch[1].trim());
-                if (rawChecksumsStr && typeof rawChecksumsStr === 'string') {
-                    pythonArticleAudioPartChecksums = rawChecksumsStr;
-                    expectedChecksumsArray = pythonArticleAudioPartChecksums.split(AUDIO_PART_CHECKSUM_DELIMITER_JS);
-                    console.log(`JS: Parsed ${expectedChecksumsArray.length} expected checksums. First: ${expectedChecksumsArray.length > 0 ? expectedChecksumsArray[0].substring(0,10) + "..." : "N/A"}`);
-                } else {
-                    console.log("JS: No valid audio part checksums string received from Python.");
-                }
-            }
-            console.log("JS: Num audio parts from Python:", pythonNumAudioParts);
-        }
-    } catch (e) {
-        console.error("JS: Error parsing python-debug-info:", e);
-    }
-    
-    const articleContentWrapper = document.getElementById('article-content-wrapper');
-    const popup = document.getElementById('translation-popup');
-    let highlightedSentence = null; 
-    let lastHighlightedSentenceElement = null; 
-    let currentPopupTargetSentence = null;
-    const contextualMenu = document.getElementById('contextual-menu');
-    const goBackButton = document.getElementById('goBackButton');
-    const goToTopButton = document.getElementById('goToTopButton'); 
-    const restoreLocationButton = document.getElementById('restoreLocationButton');
-
-    let audioContext = null;
-    let audioBuffer = null;
-    let currentSourceNode = null;
-    let isAudiobookModeFull = false; 
-    let isAudiobookModeParts = false; 
-    let currentPlayingSentence = null;
-    let maxSentenceEndTime = 0; 
-    let currentLoadedAudioPartIndex = -1; 
-
-    const toggleAudiobookModeButton = document.getElementById('toggleAudiobookMode');
-    const localAudioFileInput = document.getElementById('localAudioFile');
-    const audioFileNameSpan = document.getElementById('audioFileName');
-    const audiobookHint = document.getElementById('audiobookHint');
-
-    const switchToPartsViewButton = document.getElementById('switchToPartsViewButton');
-    const switchToFullViewButton = document.getElementById('switchToFullViewButton');
-    const fullAudioViewControls = document.getElementById('full-audio-view-controls');
-    const partsAudioViewControls = document.getElementById('parts-audio-view-controls');
-    const fullAudioDownloadDiv = document.getElementById('full-audio-download');
-    const partsAudioDownloadDiv = document.getElementById('parts-audio-download');
-    const loadSelectedAudioPartButton = document.getElementById('loadSelectedAudioPartButton'); // Server load
-    const loadLocalAudioPartButton = document.getElementById('loadLocalAudioPartButton'); // Local load
-    const localAudioPartFileInput = document.getElementById('localAudioPartFileInput'); // Hidden input for local part
-    const downloadSelectedAudioPartButton = document.getElementById('downloadSelectedAudioPartButton');
-    const loadedAudioPartNameSpan = document.getElementById('loadedAudioPartName');
-
-    function initAudioContextGlobally() {
-        if (!audioContext) {
-            try {
-                audioContext = new (window.AudioContext || window.webkitAudioContext)();
-                 console.log("JS: AudioContext initialized/resumed.");
-            } catch (e) {
-                alert("Web Audio API is not supported by this browser."); return false;
-            }
-        }
-        if (audioContext.state === 'suspended') {
-            audioContext.resume().then(() => {
-                 console.log("JS: AudioContext resumed successfully.");
-            }).catch(e => {
-                console.error("JS: Failed to resume AudioContext:", e);
-                alert("Could not resume audio context. Please interact with the page (e.g., click) and try again.");
-            });
-        }
-        return true;
-    }
-    initAudioContextGlobally(); 
-
-
-    // --- Reading Location Logic ---
-    // ... (existing saveCurrentLocation, findSentenceElement, checkAutoSave, restoreLocationButton logic) ...
-    let validClickCounter = 0;
-    const CLICK_THRESHOLD_AUTOSAVE = 5;
-
-    function findSentenceElement(pIndex, sIndex) {
-        return document.querySelector(`.english-sentence[data-paragraph-index="${pIndex}"][data-sentence-index="${sIndex}"]`);
-    }
-
-    async function saveCurrentLocation(pIndex, sIndex, source = "unknown") {
-        if (pIndex === undefined || sIndex === undefined) {
-            console.warn("JS: saveCurrentLocation called with undefined indices.");
-            return;
-        }
-        console.log(`JS: Saving location P:${pIndex}, S:${sIndex} for article ${articleId} (source: ${source})`);
-        try {
-            const response = await fetch(`/article/${articleId}/save_location`, {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ paragraph_index: pIndex, sentence_index_in_paragraph: sIndex })
-            });
-            const result = await response.json();
-            if (response.ok && result.status === 'success') {
-                console.log(`JS: Location P:${pIndex}, S:${sIndex} saved successfully (${source}).`);
-            } else {
-                console.error("JS: Failed to save location:", result.message);
-            }
-        } catch (error) {
-            console.error("JS: Error sending save location request:", error);
-        }
-    }
-
-    function checkAutoSave() {
-        if (validClickCounter >= CLICK_THRESHOLD_AUTOSAVE && highlightedSentence) {
-            const pIndex = highlightedSentence.dataset.paragraphIndex;
-            const sIndex = highlightedSentence.dataset.sentenceIndex;
-            if (pIndex !== undefined && sIndex !== undefined) {
-                saveCurrentLocation(parseInt(pIndex), parseInt(sIndex), "auto");
-                validClickCounter = 0; // Reset counter
-            }
-        }
-    }
-    
-    if (restoreLocationButton) {
-        if (initialReadingLocation && initialReadingLocation.paragraph_index !== undefined && initialReadingLocation.sentence_index_in_paragraph !== undefined) {
-            restoreLocationButton.style.display = 'inline-block';
-            restoreLocationButton.addEventListener('click', function() {
-                const targetSentence = findSentenceElement(initialReadingLocation.paragraph_index, initialReadingLocation.sentence_index_in_paragraph);
-                if (targetSentence) {
-                    if (highlightedSentence) highlightedSentence.classList.remove('highlighted-sentence');
-                    
-                    targetSentence.scrollIntoView({ behavior: 'smooth', block: 'center' });
-                    targetSentence.classList.add('highlighted-sentence');
-                    highlightedSentence = targetSentence;
-                    lastHighlightedSentenceElement = targetSentence;
-                    updateGoBackButtonVisibility();
-                    console.log("JS: Restored reading location to P:", initialReadingLocation.paragraph_index, "S:", initialReadingLocation.sentence_index_in_paragraph);
-                } else {
-                    console.warn("JS: Could not find sentence for stored reading location.");
-                }
-            });
-        } else {
-            restoreLocationButton.style.display = 'none';
-        }
-    }
-
-    // --- Go Back Button Logic ---
-    // ... (existing updateGoBackButtonVisibility, goBackButton event listener) ...
-    function updateGoBackButtonVisibility() {
-        if (lastHighlightedSentenceElement && (window.scrollY > 100 || document.documentElement.scrollTop > 100)) { 
-            const sentenceRect = lastHighlightedSentenceElement.getBoundingClientRect();
-            if (sentenceRect.bottom < 0 || sentenceRect.top > window.innerHeight || Math.abs(window.scrollY - lastHighlightedSentenceElement.offsetTop) > window.innerHeight / 2) {
-                 goBackButton.classList.add('visible');
-            } else {
-                 goBackButton.classList.remove('visible');
-            }
-        } else {
-            goBackButton.classList.remove('visible');
-        }
-    }
-
-    if (goBackButton) {
-        goBackButton.addEventListener('click', function() {
-            if (lastHighlightedSentenceElement) {
-                lastHighlightedSentenceElement.scrollIntoView({ behavior: 'smooth', block: 'center' });
-                if (highlightedSentence) highlightedSentence.classList.remove('highlighted-sentence');
-                lastHighlightedSentenceElement.classList.add('highlighted-sentence');
-                highlightedSentence = lastHighlightedSentenceElement;
-                setTimeout(() => updateGoBackButtonVisibility(), 500); 
-            }
-        });
-        window.addEventListener('scroll', updateGoBackButtonVisibility);
-        window.addEventListener('resize', updateGoBackButtonVisibility);
-    }
-
-    // --- Go To Top Button Logic ---
-    // ... (existing updateGoToTopButtonVisibility, goToTopButton event listener) ...
-    let lastScrollTop = 0;
-    const scrollThreshold = 150; 
-
-    function updateGoToTopButtonVisibility() {
-        let st = window.pageYOffset || document.documentElement.scrollTop;
-        if (st < lastScrollTop && st > scrollThreshold) { 
-            goToTopButton.classList.add('visible');
-        } else { 
-            goToTopButton.classList.remove('visible');
-        }
-        lastScrollTop = st <= 0 ? 0 : st; 
-    }
-
-    if (goToTopButton) {
-        goToTopButton.addEventListener('click', function() {
-            window.scrollTo({ top: 0, behavior: 'smooth' });
-        });
-        window.addEventListener('scroll', updateGoToTopButtonVisibility);
-        window.addEventListener('resize', updateGoToTopButtonVisibility);
-        updateGoToTopButtonVisibility(); 
-    }
-
-    // --- Contextual Menu & Popups ---
-    // ... (existing displayPopup, hideContextualMenu, hideTranslationPopup, populateAndShowContextualMenu logic) ...
-    // ... (articleContentWrapper 'contextmenu' and 'click' listeners) ...
-    // ... (contextualMenu 'click' listener) ...
-    // ... (popup 'click' listener) ...
-    // ... (document 'click' listener for hiding menu/popup) ...
-    function displayPopup(targetElement, content) { 
-        popup.innerHTML = content;
-        const rect = targetElement.getBoundingClientRect();
-        popup.style.visibility = 'hidden';
-        popup.style.display = 'block';
-        const popupWidth = popup.offsetWidth;
-        const popupHeight = popup.offsetHeight;
-        let popupTop = rect.bottom + window.scrollY + 8;
-        let popupLeft = rect.left + window.scrollX + (rect.width / 2) - (popupWidth / 2);
-
-        const minLeft = 10 + window.scrollX;
-        const viewportWidth = window.innerWidth;
-        let maxLeft = window.scrollX + viewportWidth - popupWidth - 10;
-        if (maxLeft < minLeft) maxLeft = minLeft;
-        popupLeft = Math.max(minLeft, Math.min(popupLeft, maxLeft));
-        if (popupTop < window.scrollY + 10) popupTop = window.scrollY + 10;
-        const viewportHeight = window.innerHeight;
-        if (popupTop + popupHeight > window.scrollY + viewportHeight - 10) {
-            let alternativeTop = rect.top - popupHeight - 8 + window.scrollY;
-            if (alternativeTop > window.scrollY + 10) {
-                popupTop = alternativeTop;
-            } else { 
-                popupTop = window.scrollY + viewportHeight - popupHeight - 10;
-            }
-        }
-        popup.style.top = popupTop + 'px';
-        popup.style.left = popupLeft + 'px';
-        popup.style.visibility = 'visible';
-    }
-
-    function hideContextualMenu() {
-        if (contextualMenu) {
-            contextualMenu.style.opacity = '0'; 
-            contextualMenu.style.transform = 'scale(0.95)'; 
-            setTimeout(() => { 
-                contextualMenu.style.display = 'none';
-            }, 100); 
-        }
-    }
-
-    function hideTranslationPopup() {
-        if (popup) {
-            popup.style.display = 'none';
-            currentPopupTargetSentence = null;
-        }
-    }
-
-    function populateAndShowContextualMenu(sentenceElement, clickX) {
-        if (!contextualMenu || !sentenceElement) return;
-
-        let menuHTML = `<div class="contextual-menu-item" data-action="show-translation" title="Show Chinese Translation"><span class="menu-icon">💬</span><span class="menu-text">Translate</span></div>`;
-        menuHTML += `<div class="contextual-menu-item" data-action="save-location" title="Save this reading location"><span class="menu-icon">💾</span><span class="menu-text">Save Spot</span></div>`;
-        
-        const canPlayAudio = (isAudiobookModeFull && audioContext && audioBuffer && pythonHasTimestamps) ||
-                             (isAudiobookModeParts && audioContext && audioBuffer && pythonHasTimestamps && currentLoadedAudioPartIndex !== -1 && 
-                              parseInt(sentenceElement.dataset.audioPartIndex, 10) === currentLoadedAudioPartIndex);
-
-
-        if (canPlayAudio) {
-            let audioIcon = "▶️"; 
-            let audioTitle = "Play Sentence Audio";
-            if (currentPlayingSentence === sentenceElement && currentSourceNode) {
-                audioIcon = "⏹️"; 
-                audioTitle = "Stop Sentence Audio";
-            }
-            menuHTML += `<div class="contextual-menu-item" data-action="play-pause-audio" title="${audioTitle}"><span class="menu-icon">${audioIcon}</span><span class="menu-text">Audio</span></div>`;
-        }
-
-        contextualMenu.innerHTML = menuHTML;
-        contextualMenu.style.display = 'block'; 
-        contextualMenu.style.opacity = '0'; 
-        contextualMenu.style.transform = 'scale(0.95)'; 
-
-        const rect = sentenceElement.getBoundingClientRect();
-        const menuWidth = contextualMenu.offsetWidth;
-        const menuHeight = contextualMenu.offsetHeight;
-        
-        let menuTop = rect.bottom + window.scrollY + 5; 
-        let menuLeft;
-
-        const viewportCenterX = window.innerWidth / 2;
-        if (clickX < viewportCenterX) { 
-            menuLeft = rect.left + window.scrollX;
-            contextualMenu.style.transformOrigin = 'top left';
-        } else { 
-            menuLeft = rect.right + window.scrollX - menuWidth;
-            contextualMenu.style.transformOrigin = 'top right';
-        }
-        
-        if (menuLeft < window.scrollX + 10) menuLeft = window.scrollX + 10;
-        if (menuLeft + menuWidth > window.innerWidth + window.scrollX - 10) {
-            menuLeft = window.innerWidth + window.scrollX - menuWidth - 10;
-        }
-        if (menuTop + menuHeight > window.innerHeight + window.scrollY - 10) {
-            menuTop = rect.top + window.scrollY - menuHeight - 5; 
-        }
-        if (menuTop < window.scrollY + 10) menuTop = window.scrollY + 10;
-
-        contextualMenu.style.top = menuTop + 'px';
-        contextualMenu.style.left = menuLeft + 'px';
-        setTimeout(() => { 
-             contextualMenu.style.opacity = '1';
-             contextualMenu.style.transform = 'scale(1)'; 
-        }, 10);
-    }
-
-    if (articleContentWrapper) {
-        articleContentWrapper.addEventListener('contextmenu', function(event) {
-            const targetSentence = event.target.closest('.english-sentence');
-            if (targetSentence) {
-                event.preventDefault();
-                hideContextualMenu(); 
-                const translation = targetSentence.dataset.translation;
-                if (translation) {
-                    displayPopup(targetSentence, translation);
-                    currentPopupTargetSentence = targetSentence;
-                } else { 
-                    displayPopup(targetSentence, "No translation available for this sentence.");
-                }
-                if (!((isAudiobookModeFull || isAudiobookModeParts) && currentPlayingSentence === targetSentence)) {
-                    if (highlightedSentence && highlightedSentence !== targetSentence) {
-                         highlightedSentence.classList.remove('highlighted-sentence');
-                         validClickCounter++;
-                         checkAutoSave();
-                    }
-                    if (highlightedSentence !== targetSentence) {
-                        targetSentence.classList.add('highlighted-sentence');
-                        highlightedSentence = targetSentence;
-                        lastHighlightedSentenceElement = targetSentence; 
-                        updateGoBackButtonVisibility();
-                    }
-                }
-            } else {
-                hideTranslationPopup();
-            }
-        });
-
-        articleContentWrapper.addEventListener('click', function(event) {
-            const targetSentence = event.target.closest('.english-sentence');
-
-            if (targetSentence) {
-                event.stopPropagation(); 
-                hideTranslationPopup(); 
-
-                if (highlightedSentence === targetSentence) { 
-                    if (contextualMenu.style.display === 'block' && contextualMenu.style.opacity === '1') {
-                        hideContextualMenu();
-                    } else {
-                        populateAndShowContextualMenu(targetSentence, event.clientX);
-                    }
-                } else { 
-                    if (highlightedSentence) {
-                        highlightedSentence.classList.remove('highlighted-sentence');
-                    }
-                    highlightedSentence = targetSentence;
-                    lastHighlightedSentenceElement = targetSentence; 
-                    highlightedSentence.classList.add('highlighted-sentence');
-                    hideContextualMenu(); 
-                    updateGoBackButtonVisibility();
-                    
-                    validClickCounter++; 
-                    checkAutoSave();
-
-                    if (isAudiobookModeFull && audioContext && audioBuffer) {
-                        playSentenceAudio(targetSentence, false); 
-                    } else if (isAudiobookModeParts && audioContext && audioBuffer) {
-                        const sentencePartIndexStr = targetSentence.dataset.audioPartIndex;
-                        if (typeof sentencePartIndexStr === 'undefined') {
-                             alert("This sentence is not assigned to an audio part. Timestamps may be missing or parts not generated correctly.");
-                        } else {
-                            const sentencePartIndex = parseInt(sentencePartIndexStr, 10);
-                            if (sentencePartIndex !== currentLoadedAudioPartIndex) {
-                                alert(`This sentence is in audio part ${sentencePartIndex + 1}. Please load part ${sentencePartIndex + 1} first.`);
-                                const radioToSelect = document.querySelector(`#audio-part-selector-playback input[name="audio_part_playback"][value="${sentencePartIndex}"]`);
-                                if (radioToSelect) {
-                                    radioToSelect.checked = true;
-                                }
-                            } else {
-                                playSentenceAudio(targetSentence, true); 
-                            }
-                        }
-                    } else if ((isAudiobookModeFull || isAudiobookModeParts) && (!audioContext || !audioBuffer)) {
-                         if (isAudiobookModeFull) console.log("JS: Full audiobook mode active, but audio not loaded/ready.");
-                         if (isAudiobookModeParts && pythonNumAudioParts > 0) { 
-                             console.log("JS: Parts audiobook mode active, but audio part not loaded/ready.");
-                             alert("Please load an audio part first using the controls above.");
-                         }
-                    }
-                }
-            } else { 
-                if (!contextualMenu.contains(event.target)) { 
-                    hideContextualMenu();
-                }
-                if (!popup.contains(event.target)) { 
-                    hideTranslationPopup();
-                }
-                if (highlightedSentence && 
-                    !contextualMenu.contains(event.target) && 
-                    !popup.contains(event.target) &&
-                    !goBackButton.contains(event.target) &&
-                    !goToTopButton.contains(event.target) ) { 
-                    highlightedSentence.classList.remove('highlighted-sentence');
-                    highlightedSentence = null;
-                    updateGoBackButtonVisibility(); 
-                }
-            }
-        });
-    }
-
-    if (contextualMenu) {
-        contextualMenu.addEventListener('click', function(event) {
-            event.stopPropagation(); 
-            const actionTarget = event.target.closest('.contextual-menu-item');
-            if (!actionTarget || !highlightedSentence) {
-                hideContextualMenu();
-                return;
-            }
-
-            const action = actionTarget.dataset.action;
-            switch (action) {
-                case 'show-translation':
-                    const translation = highlightedSentence.dataset.translation;
-                    if (translation) {
-                        displayPopup(highlightedSentence, translation);
-                        currentPopupTargetSentence = highlightedSentence;
-                    } else {
-                        displayPopup(highlightedSentence, 'No translation available.');
-                    }
-                    break;
-                case 'save-location':
-                    const pIndex = highlightedSentence.dataset.paragraphIndex;
-                    const sIndex = highlightedSentence.dataset.sentenceIndex;
-                    if (pIndex !== undefined && sIndex !== undefined) {
-                         saveCurrentLocation(parseInt(pIndex), parseInt(sIndex), "manual_menu");
-                    } else {
-                        console.warn("JS: Could not save location, indices missing from highlighted sentence.");
-                    }
-                    break;
-                case 'play-pause-audio':
-                    let playAsPart = false;
-                    let canPlayThis = false;
-
-                    if (isAudiobookModeFull && audioContext && audioBuffer && pythonHasTimestamps) {
-                        canPlayThis = true;
-                        playAsPart = false;
-                    } else if (isAudiobookModeParts && audioContext && audioBuffer && pythonHasTimestamps && currentLoadedAudioPartIndex !== -1) {
-                         const sentencePartIndex = parseInt(highlightedSentence.dataset.audioPartIndex, 10);
-                         if (sentencePartIndex === currentLoadedAudioPartIndex) {
-                            canPlayThis = true;
-                            playAsPart = true;
-                         } 
-                    }
-                    if (canPlayThis) {
-                        const iconSpan = actionTarget.querySelector('.menu-icon');
-                        if (currentPlayingSentence === highlightedSentence && currentSourceNode) { 
-                            stopCurrentAudio();
-                            if (currentPlayingSentence) currentPlayingSentence.classList.remove('playing-sentence');
-                            if (iconSpan) iconSpan.textContent = "▶️";
-                            actionTarget.title = "Play Sentence Audio";
-                        } else { 
-                            playSentenceAudio(highlightedSentence, playAsPart); 
-                            if (iconSpan) iconSpan.textContent = "⏹️";
-                            actionTarget.title = "Stop Sentence Audio";
-                            validClickCounter++; 
-                            checkAutoSave();
-                        }
-                    } else {
-                         alert("Audio not ready or sentence part mismatch. Please load the correct audio/part.");
-                    } 
-                    break;
-            }
-            hideContextualMenu();
-        });
-    }
-
-    if (popup) { 
-        popup.addEventListener('click', function() {
-            hideTranslationPopup();
-        });
-    }
-
-    document.addEventListener('click', function(event) {
-        if (contextualMenu.style.display === 'block' &&
-            !contextualMenu.contains(event.target) &&
-            !event.target.closest('.english-sentence')) {
-            hideContextualMenu();
-        }
-
-        if (popup.style.display === 'block' &&
-            !popup.contains(event.target) &&
-            !event.target.closest('.english-sentence') && 
-            !(contextualMenu.style.display === 'block' && contextualMenu.contains(event.target))) { 
-            hideTranslationPopup();
-        }
-        updateGoBackButtonVisibility(); 
-    });
-
-    // --- Full Audiobook Mode Logic ---
-    // ... (existing toggleAudiobookModeButton, localAudioFileInput listeners, playSentenceAudio, proceedWithPlayback, stopCurrentAudio) ...
-        if (toggleAudiobookModeButton) {        
-        document.querySelectorAll('.english-sentence').forEach(s => {
-            const endTime = parseInt(s.dataset.endTimeMs, 10);
-            if (!isNaN(endTime) && endTime > maxSentenceEndTime) maxSentenceEndTime = endTime;
-        });
-
-        toggleAudiobookModeButton.addEventListener('click', function() {
-            if (!initAudioContextGlobally() && !isAudiobookModeFull) return;
-            isAudiobookModeFull = !isAudiobookModeFull;
-            if (isAudiobookModeFull) {
-                toggleAudiobookModeButton.textContent = 'Disable Audiobook Mode (Full)';
-                localAudioFileInput.style.display = 'inline-block';
-                audiobookHint.style.display = 'block';
-                isAudiobookModeParts = false; 
-                updatePartsViewModeUI(); 
-            } else { 
-                toggleAudiobookModeButton.textContent = 'Enable Audiobook Mode (Full Audio)';
-                localAudioFileInput.style.display = 'none';
-                audiobookHint.style.display = 'none';
-                stopCurrentAudio();
-                if (currentPlayingSentence) currentPlayingSentence.classList.remove('playing-sentence');
-                currentPlayingSentence = null;
-            }
-            hideContextualMenu(); 
-            hideTranslationPopup();
-            updateGoBackButtonVisibility();
-            updateGoToTopButtonVisibility();
-        });
-
-        localAudioFileInput.addEventListener('change', async function(event) {
-            if (!initAudioContextGlobally()) return;
-            const file = event.target.files[0];
-            if (file) {
-                audioFileNameSpan.textContent = "Loading: " + file.name;
-                stopCurrentAudio();
-                if (currentPlayingSentence) currentPlayingSentence.classList.remove('playing-sentence');
-                currentPlayingSentence = null;
-                audioBuffer = null; 
-                try {
-                    const arrayBuffer = await file.arrayBuffer();
-                    audioBuffer = await audioContext.decodeAudioData(arrayBuffer);
-                    audioFileNameSpan.textContent = file.name;
-                     if (maxSentenceEndTime > 0 && (audioBuffer.duration * 1000 < maxSentenceEndTime)) {
-                        alert(`Warning: Audio duration (${(audioBuffer.duration).toFixed(2)}s) may be shorter than max sentence time (${(maxSentenceEndTime/1000).toFixed(2)}s).`);
-                    }
-                } catch (e) {
-                    alert(`Error decoding audio: ${e.message}`);
-                    audioFileNameSpan.textContent = "Error loading: " + file.name;
-                    audioBuffer = null;
-                }
-            }
-        });
-
-        function playSentenceAudio(sentenceElement, isPlayingFromPart) {
-            if (!audioContext || audioContext.state === 'closed') { alert("Audio system error."); return; }
-            if (audioContext.state === 'suspended') {
-                audioContext.resume().then(() => proceedWithPlayback(sentenceElement, isPlayingFromPart))
-                                  .catch(e => { alert("Could not start audio playback. Please interact with the page and try again."); });
-            } else {
-                proceedWithPlayback(sentenceElement, isPlayingFromPart);
-            }
-        }
-        
-        function proceedWithPlayback(sentenceElement, isPlayingFromPart) {
-            if (!audioBuffer) { 
-                if (isAudiobookModeFull) alert("Please load the full audio file first."); 
-                else if (isAudiobookModeParts) alert("Please load the selected audio part first.");
-                return; 
-            }
-            
-            stopCurrentAudio(); // This already sets currentSourceNode to null if one was playing
-
-            if (currentPlayingSentence && currentPlayingSentence !== sentenceElement) {
-                currentPlayingSentence.classList.remove('playing-sentence');
-            }
-
-            let startTimeMs, endTimeMs;
-            if (isPlayingFromPart) {
-                startTimeMs = parseInt(sentenceElement.dataset.startTimeInPartMs, 10);
-                endTimeMs = parseInt(sentenceElement.dataset.endTimeInPartMs, 10);
-            } else {
-                startTimeMs = parseInt(sentenceElement.dataset.startTimeMs, 10);
-                endTimeMs = parseInt(sentenceElement.dataset.endTimeMs, 10);
-            }
-
-            if (isNaN(startTimeMs) || isNaN(endTimeMs)) { 
-                alert("Sentence missing time data. Cannot play audio."); 
-                return; 
-            }
-
-            const offsetInSeconds = startTimeMs / 1000.0;
-            const durationInSecondsRaw = (endTimeMs - startTimeMs) / 1000.0;
-
-            if (offsetInSeconds < 0 || offsetInSeconds >= audioBuffer.duration) { 
-                alert(`Sentence start time (${offsetInSeconds.toFixed(2)}s) is out of audio bounds (duration ${audioBuffer.duration.toFixed(2)}s).`); 
-                return; 
-            }
-            let durationToPlay = durationInSecondsRaw <= 0 ? 0.05 : durationInSecondsRaw;
-            durationToPlay = Math.min(durationToPlay, audioBuffer.duration - offsetInSeconds);
-            
-            currentPlayingSentence = sentenceElement;
-            currentPlayingSentence.classList.add('playing-sentence');
-            if (highlightedSentence && highlightedSentence !== currentPlayingSentence) {
-                highlightedSentence.classList.remove('highlighted-sentence');
-            }
-            highlightedSentence = currentPlayingSentence; 
-            lastHighlightedSentenceElement = highlightedSentence;
-            updateGoBackButtonVisibility();
-            updateGoToTopButtonVisibility();
-
-            currentSourceNode = audioContext.createBufferSource();
-            currentSourceNode.buffer = audioBuffer;
-            currentSourceNode.connect(audioContext.destination);
-            
-            const thisSourceNodeForOnEnded = currentSourceNode; // Capture for the onended closure
-
-            try {
-                currentSourceNode.start(0, offsetInSeconds, durationToPlay); 
-            } catch (e) {
-                alert(`Could not start playback: ${e.message}`);
-                if (currentPlayingSentence) currentPlayingSentence.classList.remove('playing-sentence');
-                currentPlayingSentence = null; 
-                currentSourceNode = null;
-                return;
-            }
-            
-            thisSourceNodeForOnEnded.onended = () => {
-                // Only modify state if this 'onended' is for the node we currently think is playing
-                if (currentSourceNode === thisSourceNodeForOnEnded) {
-                    currentSourceNode = null; // *** THIS IS THE KEY FIX ***
-                }
-
-                // Remove playing class if it's the sentence that just finished
-                if (currentPlayingSentence === sentenceElement) { 
-                    currentPlayingSentence.classList.remove('playing-sentence');
-                    // Optional: currentPlayingSentence = null; 
-                    // This would mean that after playing, no sentence is considered "currentPlayingSentence"
-                    // For now, let's rely on currentSourceNode being null.
-                }
-
-                // Update the menu icon if the menu is visible and for the correct sentence
-                if (contextualMenu.style.display === 'block' && highlightedSentence === sentenceElement) {
-                    const audioButtonIcon = contextualMenu.querySelector('.contextual-menu-item[data-action="play-pause-audio"] .menu-icon');
-                    if (audioButtonIcon) audioButtonIcon.textContent = "▶️";
-                    const audioButton = contextualMenu.querySelector('.contextual-menu-item[data-action="play-pause-audio"]');
-                    if(audioButton) audioButton.title = "Play Sentence Audio";
-                }
-            }; 
-        } 
-
-        function stopCurrentAudio() {
-            if (currentSourceNode) {
-                try { 
-                    currentSourceNode.onended = null; // Important to remove old onended handler
-                    currentSourceNode.stop(); 
-                    currentSourceNode.disconnect();
-                } catch (e) { /* ignore errors if node is already stopped or disconnected */ }
-                currentSourceNode = null; // Ensure it's nulled
-            }
-        }
-    } else {
-        console.log("JS: toggleAudiobookModeButton not found.");
-    }
-
-    // Helper function to convert ArrayBuffer to Hex String (for SHA256)
-    function arrayBufferToHexString(buffer) {
-        const byteArray = new Uint8Array(buffer);
-        let hexString = "";
-        for (let i = 0; i < byteArray.length; i++) {
-            const hex = byteArray[i].toString(16);
-            hexString += (hex.length === 1 ? "0" : "") + hex;
-        }
-        return hexString;
-    }
-
-    // --- Audio Parts View Logic ---
-    let isPartsViewActive = false;
-
-    function updatePartsViewModeUI() {
-        // ... (existing updatePartsViewModeUI logic) ...
-        if (isPartsViewActive) {
-            if(partsAudioViewControls) partsAudioViewControls.style.display = 'block';
-            if(fullAudioViewControls) fullAudioViewControls.style.display = 'none';
-            if(partsAudioDownloadDiv) partsAudioDownloadDiv.style.display = 'block';
-            if(fullAudioDownloadDiv) fullAudioDownloadDiv.style.display = 'none';
-            if(switchToPartsViewButton) switchToPartsViewButton.style.display = 'none';
-            if(switchToFullViewButton) switchToFullViewButton.style.display = 'inline-block';
-            
-            isAudiobookModeParts = true; 
-            isAudiobookModeFull = false; 
-            if (toggleAudiobookModeButton) {
-                 toggleAudiobookModeButton.textContent = 'Enable Audiobook Mode (Full Audio)';
-                 if(localAudioFileInput) localAudioFileInput.style.display = 'none';
-                 if(audioFileNameSpan) audioFileNameSpan.textContent = 'No audio file selected.';
-                 if(audiobookHint) audiobookHint.style.display = 'none';
-            }
-            stopCurrentAudio();
-            if(currentPlayingSentence) currentPlayingSentence.classList.remove('playing-sentence');
-            currentPlayingSentence = null;
-            audioBuffer = null; 
-            if(loadedAudioPartNameSpan) loadedAudioPartNameSpan.textContent = "No part loaded.";
-            currentLoadedAudioPartIndex = -1;
-
-        } else { 
-            if(partsAudioViewControls) partsAudioViewControls.style.display = 'none';
-            if(fullAudioViewControls) fullAudioViewControls.style.display = 'block';
-            if(partsAudioDownloadDiv) partsAudioDownloadDiv.style.display = 'none';
-            if(fullAudioDownloadDiv) fullAudioDownloadDiv.style.display = 'block';
-            if(switchToPartsViewButton) switchToPartsViewButton.style.display = 'inline-block';
-            if(switchToFullViewButton) switchToFullViewButton.style.display = 'none';
-            
-            isAudiobookModeParts = false;
-            stopCurrentAudio(); 
-            if(currentPlayingSentence) currentPlayingSentence.classList.remove('playing-sentence');
-        }
-    }
-
-
-    if (pythonNumAudioParts > 0 && pythonMp3PartsFolderPath) {
-        if (switchToPartsViewButton) {
-            switchToPartsViewButton.addEventListener('click', () => {
-                isPartsViewActive = true;
-                updatePartsViewModeUI();
-            });
-        }
-        if (switchToFullViewButton) {
-            switchToFullViewButton.addEventListener('click', () => {
-                isPartsViewActive = false;
-                updatePartsViewModeUI();
-            });
-        }
-
-        const playbackSelectorDiv = document.getElementById('audio-part-selector-playback');
-        const downloadSelectorDiv = document.getElementById('audio-part-selector-download');
-        if (playbackSelectorDiv && downloadSelectorDiv) {
-            for (let i = 0; i < pythonNumAudioParts; i++) {
-                const partNumDisplay = i + 1;
-                // For playback
-                const rbPlayback = document.createElement('input');
-                rbPlayback.type = 'radio';
-                rbPlayback.name = 'audio_part_playback';
-                rbPlayback.value = i;
-                rbPlayback.id = `part_playback_${i}`;
-                const lblPlayback = document.createElement('label');
-                lblPlayback.htmlFor = `part_playback_${i}`;
-                lblPlayback.textContent = `Part ${partNumDisplay}`;
-                playbackSelectorDiv.appendChild(rbPlayback);
-                playbackSelectorDiv.appendChild(lblPlayback);
-                if (i < pythonNumAudioParts -1) playbackSelectorDiv.appendChild(document.createTextNode(" ")); 
-
-                // For download
-                const rbDownload = document.createElement('input');
-                rbDownload.type = 'radio';
-                rbDownload.name = 'audio_part_download';
-                rbDownload.value = i;
-                rbDownload.id = `part_download_${i}`;
-                const lblDownload = document.createElement('label');
-                lblDownload.htmlFor = `part_download_${i}`;
-                lblDownload.textContent = `Part ${partNumDisplay}`;
-                downloadSelectorDiv.appendChild(rbDownload);
-                downloadSelectorDiv.appendChild(lblDownload);
-                 if (i < pythonNumAudioParts -1) downloadSelectorDiv.appendChild(document.createTextNode(" ")); 
-            }
-        }
-
-        // Server-side part loading
-        if (loadSelectedAudioPartButton) {
-            loadSelectedAudioPartButton.addEventListener('click', async () => {
-                if (!initAudioContextGlobally()) return;
-                const selectedPartInput = document.querySelector('#audio-part-selector-playback input[name="audio_part_playback"]:checked');
-                if (!selectedPartInput) { alert("Please select an audio part to load."); return; }
-                const partIndex = parseInt(selectedPartInput.value, 10);
-                
-                if(localAudioPartFileInput) localAudioPartFileInput.value = ""; // Clear local file selection
-                loadedAudioPartNameSpan.textContent = `Loading Part ${partIndex + 1} (Server)...`;
-                stopCurrentAudio();
-                audioBuffer = null; 
-
-                try {
-                    const response = await fetch(`/article/${articleId}/serve_mp3_part/${partIndex}`);
-                    if (!response.ok) throw new Error(`Failed to fetch audio part ${partIndex + 1}: ${response.statusText}`);
-                    const arrayBuffer = await response.arrayBuffer();
-                    audioBuffer = await audioContext.decodeAudioData(arrayBuffer); 
-                    loadedAudioPartNameSpan.textContent = `Loaded Part ${partIndex + 1} (Server)`;
-                    currentLoadedAudioPartIndex = partIndex;
-                    isAudiobookModeParts = true; 
-                    isAudiobookModeFull = false; 
-                    console.log(`JS: Loaded server audio part ${partIndex + 1}. Duration: ${audioBuffer.duration.toFixed(2)}s`);
-                } catch (e) {
-                    alert(`Error loading audio part ${partIndex + 1} from server: ${e.message}`);
-                    loadedAudioPartNameSpan.textContent = `Error loading Part ${partIndex + 1} (Server)`;
-                    audioBuffer = null;
-                    currentLoadedAudioPartIndex = -1;
-                }
-            });
-        }
-        
-        // Local part file loading button
-        if (loadLocalAudioPartButton) {
-            loadLocalAudioPartButton.addEventListener('click', () => {
-                if (!initAudioContextGlobally()) return;
-                const selectedPartInput = document.querySelector('#audio-part-selector-playback input[name="audio_part_playback"]:checked');
-                if (!selectedPartInput) {
-                    alert("Please select an audio part first (using the radio buttons).");
-                    return;
-                }
-                if (localAudioPartFileInput) localAudioPartFileInput.click(); 
-            });
-        }
-
-        // Handler for local file input
-        if (localAudioPartFileInput) {
-            localAudioPartFileInput.addEventListener('change', async function(event) {
-                if (!initAudioContextGlobally()) return;
-                const file = event.target.files[0];
-                if (!file) return;
-
-                const selectedPartInput = document.querySelector('#audio-part-selector-playback input[name="audio_part_playback"]:checked');
-                if (!selectedPartInput) { 
-                    alert("Error: No part selected. Please select a part using the radio buttons."); 
-                    localAudioPartFileInput.value = ""; // Reset
-                    return; 
-                } 
-                
-                const partIndex = parseInt(selectedPartInput.value, 10);
-
-                if (expectedChecksumsArray.length === 0 || partIndex >= expectedChecksumsArray.length) {
-                    alert(`Error: Expected checksum for part ${partIndex + 1} not found. Cannot verify local file.`);
-                    if(loadedAudioPartNameSpan) loadedAudioPartNameSpan.textContent = `Checksum missing for Part ${partIndex + 1}`;
-                    localAudioPartFileInput.value = ""; 
-                    return;
-                }
-                const expectedChecksum = expectedChecksumsArray[partIndex];
-
-                if (!expectedChecksum || expectedChecksum.trim() === "") {
-                    alert(`Warning: The expected checksum for Part ${partIndex + 1} is missing or empty. Cannot verify. Proceeding to load local file without verification.`);
-                    // No explicit return, will proceed to load. User is warned.
-                }
-
-                if(loadedAudioPartNameSpan) loadedAudioPartNameSpan.textContent = `Verifying Part ${partIndex + 1} (Local: ${file.name})...`;
-                stopCurrentAudio();
-                audioBuffer = null;
-
-                try {
-                    const fileBuffer = await file.arrayBuffer();
-                    const hashBuffer = await window.crypto.subtle.digest('SHA-256', fileBuffer);
-                    const calculatedHexChecksum = arrayBufferToHexString(hashBuffer);
-
-                    console.log(`JS: Part ${partIndex + 1} - Expected CS: ${expectedChecksum || "N/A"}, Calculated CS (local): ${calculatedHexChecksum}`);
-
-                    // Only perform strict check if expectedChecksum is present and non-empty
-                    if (expectedChecksum && expectedChecksum.trim() !== "" && calculatedHexChecksum.toLowerCase() !== expectedChecksum.toLowerCase()) {
-                        alert(`Checksum mismatch for Part ${partIndex + 1}.\nExpected: ...${expectedChecksum.slice(-10)}\nGot:      ...${calculatedHexChecksum.slice(-10)}\nPlease select the correct local file.`);
-                        if(loadedAudioPartNameSpan) loadedAudioPartNameSpan.textContent = `Incorrect file for Part ${partIndex + 1}`;
-                        currentLoadedAudioPartIndex = -1;
-                        localAudioPartFileInput.value = ""; 
-                        return;
-                    }
-                    
-                    audioBuffer = await audioContext.decodeAudioData(fileBuffer.slice(0)); 
-                    if(loadedAudioPartNameSpan) loadedAudioPartNameSpan.textContent = `Loaded Part ${partIndex + 1} (Local: ${file.name})`;
-                    currentLoadedAudioPartIndex = partIndex;
-                    isAudiobookModeParts = true;
-                    isAudiobookModeFull = false;
-                    console.log(`JS: Loaded local audio part ${partIndex + 1}. Duration: ${audioBuffer.duration.toFixed(2)}s`);
-
-                } catch (e) {
-                    alert(`Error processing local audio part ${partIndex + 1}: ${e.message}`);
-                    if(loadedAudioPartNameSpan) loadedAudioPartNameSpan.textContent = `Error loading local Part ${partIndex + 1}`;
-                    audioBuffer = null;
-                    currentLoadedAudioPartIndex = -1;
-                }
-                localAudioPartFileInput.value = ""; 
-            });
-        }
-
-
-        if (downloadSelectedAudioPartButton) {
-            downloadSelectedAudioPartButton.addEventListener('click', () => {
-                const selectedPartInput = document.querySelector('#audio-part-selector-download input[name="audio_part_download"]:checked');
-                if (!selectedPartInput) { alert("Please select an audio part to download."); return; }
-                const partIndex = selectedPartInput.value;
-                window.open(`/article/${articleId}/serve_mp3_part/${partIndex}?download=true`, '_blank'); 
-            });
-        }
-
-        const isIOS = /iPad|iPhone|iPod/.test(navigator.userAgent) && !window.MSStream;
-        if (isIOS && pythonNumAudioParts > 0) { 
-            console.log("JS: iOS detected and audio parts available, switching to parts view.");
-            isPartsViewActive = true;
-            updatePartsViewModeUI();
-        } else if (!isIOS && switchToPartsViewButton) { 
-             isPartsViewActive = false;
-             updatePartsViewModeUI();
-        }
-
-    } else { 
-        if (switchToPartsViewButton) switchToPartsViewButton.style.display = 'none';
-        if (switchToFullViewButton) switchToFullViewButton.style.display = 'none';
-        if (partsAudioViewControls) partsAudioViewControls.style.display = 'none';
-        if (partsAudioDownloadDiv) partsAudioDownloadDiv.style.display = 'none';
-        if (loadLocalAudioPartButton) loadLocalAudioPartButton.style.display = 'none';
-    }
-});
-</script>
+<script src="{{ url_for('static', filename='js/article_view.js') }}" defer></script>
 {% endblock %}
