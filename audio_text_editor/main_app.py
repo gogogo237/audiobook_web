@@ -17,7 +17,7 @@ import requests # Added
 import tempfile # Added
 
 # Constants
-FLASK_BACKEND_URL = "https://localhost:5002" # Reverted to HTTP for local testing; change back to HTTPS if your local server uses a self-signed cert
+FLASK_BACKEND_URL = "https://localhost:5002" 
 
 # --- Article Selection Dialog ---
 class ArticleSelectionDialog(QDialog):
