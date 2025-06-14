@@ -210,6 +210,84 @@ class MainWindow(QMainWindow):
         self.playback_line.hide()
         QMessageBox.critical(self, "Playback Error", f"Error during playback: {self.player.errorString()}")
 
+    # --- Playback Methods ---
+    def play_audio_segment(self, start_time_ms: int, end_time_ms: int):
+        if logger:
+            logger.info(f"play_audio_segment called: start_ms={start_time_ms}, end_ms={end_time_ms}")
+        else:
+            print(f"play_audio_segment called: start_ms={start_time_ms}, end_ms={end_time_ms}")
+
+        if not self.current_audio_path or not os.path.exists(self.current_audio_path):
+            msg = f"No valid audio path set or file does not exist: {self.current_audio_path}"
+            if logger:
+                logger.error(msg)
+            else:
+                print(f"ERROR: {msg}")
+            QMessageBox.warning(self, "Playback Error", "Audio file not available for playback.")
+            return
+
+        if self.player.state() == QMediaPlayer.PlayingState or self.player.state() == QMediaPlayer.PausedState:
+            self.player.stop() # This should ideally trigger hiding line via stateChanged or EndOfMedia if timer was running
+            self.playback_timer.stop() # Explicitly stop timer
+            self.playback_line.hide()  # Explicitly hide line
+            if logger:
+                logger.debug("Player stopped, timer stopped, and playback line hidden before new playback segment.")
+
+        self.target_start_ms = start_time_ms
+        self.target_end_ms = end_time_ms # Stored for timer logic later
+
+        url = QUrl.fromLocalFile(self.current_audio_path)
+        content = QMediaContent(url)
+
+        if not self._media_status_connected: # Connect only once
+            self.player.mediaStatusChanged.connect(self.on_media_status_changed)
+            self._media_status_connected = True
+            if logger:
+                logger.debug("Connected mediaStatusChanged signal.")
+
+        if logger:
+            logger.debug(f"Setting media to: {url.toLocalFile()}")
+        self.player.setMedia(content)
+
+    def on_media_status_changed(self, status):
+        if logger:
+            logger.debug(f"Media status changed: {status}")
+        else:
+            print(f"Media status changed: {status}")
+
+        if status == QMediaPlayer.LoadedMedia:
+            if logger:
+                logger.info(f"Media loaded. Setting position to {self.target_start_ms} ms.")
+            self.player.setPosition(self.target_start_ms)
+
+            self.playback_line.setValue(self.target_start_ms / 1000.0)
+            self.playback_line.show()
+
+            self.player.play()
+
+            self.playback_timer.start(50)
+            if logger:
+                logger.info(f"Playback started from {self.target_start_ms} ms. Line shown, timer started. Will stop near {self.target_end_ms} ms.")
+
+        elif status == QMediaPlayer.EndOfMedia:
+            if logger:
+                logger.info("Reached QMediaPlayer.EndOfMedia. Stopping timer and hiding line.")
+            self.playback_timer.stop()
+            self.playback_line.hide()
+
+        elif status == QMediaPlayer.InvalidMedia:
+            err_msg = f"Invalid media: {self.player.errorString()}"
+            if logger:
+                logger.error(err_msg)
+            QMessageBox.critical(self, "Playback Error", f"Could not load the audio for playback: Invalid media. ({self.player.errorString()})")
+
+        elif status == QMediaPlayer.NoMedia:
+            if self.player.source() and not self.player.source().isEmpty():
+                 err_msg = f"No media loaded, though a source was provided: {self.player.source().url().toLocalFile() if self.player.source() else 'None'}"
+                 if logger:
+                     logger.error(err_msg)
+                 QMessageBox.critical(self, "Playback Error", "Could not load the audio for playback: No media found.")
+
     def prompt_load_article(self):
         # QApplication.setOverrideCursor(Qt.WaitCursor) # Set cursor before dialog potentially lengthy ops
         # try:
@@ -937,188 +1015,13 @@ if __name__ == '__main__':
     # Example: Automatically load an article on startup for quick testing
     # main_window.load_article("test_article_1")
 
-    # --- Playback Methods ---
-    def play_audio_segment(self, start_time_ms: int, end_time_ms: int):
-        if logger:
-            logger.info(f"play_audio_segment called: start_ms={start_time_ms}, end_ms={end_time_ms}")
-        else:
-            print(f"play_audio_segment called: start_ms={start_time_ms}, end_ms={end_time_ms}")
+# Note: The more complete update_playback_line_position is defined earlier.
+# The simpler one that was here has been removed.
 
-        if not self.current_audio_path or not os.path.exists(self.current_audio_path):
-            msg = f"No valid audio path set or file does not exist: {self.current_audio_path}"
-            if logger:
-                logger.error(msg)
-            else:
-                print(f"ERROR: {msg}")
-            QMessageBox.warning(self, "Playback Error", "Audio file not available for playback.")
-            return
-
-        if self.player.state() == QMediaPlayer.PlayingState or self.player.state() == QMediaPlayer.PausedState:
-            self.player.stop() # This should ideally trigger hiding line via stateChanged or EndOfMedia if timer was running
-            self.playback_timer.stop() # Explicitly stop timer
-            self.playback_line.hide()  # Explicitly hide line
-            if logger:
-                logger.debug("Player stopped, timer stopped, and playback line hidden before new playback segment.")
-
-        self.target_start_ms = start_time_ms
-        self.target_end_ms = end_time_ms # Stored for timer logic later
-
-        url = QUrl.fromLocalFile(self.current_audio_path)
-        content = QMediaContent(url)
-
-        # Connect mediaStatusChanged only if not already connected
-        # A more robust way might be to disconnect first if already connected, then reconnect,
-        # or use a flag as done here.
-        if not self._media_status_connected:
-            self.player.mediaStatusChanged.connect(self.on_media_status_changed)
-            self._media_status_connected = True
-            if logger:
-                logger.debug("Connected mediaStatusChanged signal.")
-
-        if logger:
-            logger.debug(f"Setting media to: {url.toLocalFile()}")
-        self.player.setMedia(content)
-        # Position will be set in on_media_status_changed when media is loaded
-
-    def on_media_status_changed(self, status):
-        if logger:
-            logger.debug(f"Media status changed: {status}")
-        else:
-            print(f"Media status changed: {status}")
-
-        if status == QMediaPlayer.LoadedMedia:
-            if logger:
-                logger.info(f"Media loaded. Setting position to {self.target_start_ms} ms.")
-            self.player.setPosition(self.target_start_ms) # Set position first
-
-            # Prepare and show the playback line
-            self.playback_line.setValue(self.target_start_ms / 1000.0)
-            self.playback_line.show()
-
-            self.player.play() # Then play
-
-            self.playback_timer.start(50) # Start timer for line updates
-            if logger:
-                logger.info(f"Playback started from {self.target_start_ms} ms. Line shown, timer started. Will stop near {self.target_end_ms} ms.")
-
-        elif status == QMediaPlayer.EndOfMedia:
-            if logger:
-                logger.info("Reached QMediaPlayer.EndOfMedia. Stopping timer and hiding line.")
-            self.playback_timer.stop()
-            self.playback_line.hide()
-
-        elif status == QMediaPlayer.InvalidMedia:
-            err_msg = f"Invalid media: {self.player.errorString()}"
-            if logger:
-                logger.error(err_msg)
-            QMessageBox.critical(self, "Playback Error", f"Could not load the audio for playback: Invalid media. ({self.player.errorString()})")
-
-        elif status == QMediaPlayer.NoMedia:
-            # This can happen if setMedia(QMediaContent()) is called with an empty QMediaContent, or after stop() and setMedia(None)
-            # It's not necessarily an error if it's an intended state, but if we just tried to load valid media, it's an issue.
-            if self.player.source() and not self.player.source().isEmpty(): # Check if we were trying to load something
-                 err_msg = f"No media loaded, though a source was provided: {self.player.source().url().toLocalFile() if self.player.source() else 'None'}"
-                 if logger:
-                     logger.error(err_msg)
-                 QMessageBox.critical(self, "Playback Error", "Could not load the audio for playback: No media found.")
-
-    def update_playback_line_position(self):
-        if hasattr(self, 'player') and self.player.state() == QMediaPlayer.PlayingState:
-            current_pos_ms = self.player.position()
-            if hasattr(self, 'playback_line'):
-                self.playback_line.setValue(current_pos_ms / 1000.0) # Convert ms to seconds for plot
-
-            # Check if playback needs to stop at target_end_ms
-            # Use a small buffer (e.g., 20-50ms) for precision with timer intervals
-            buffer_ms = 50
-            if hasattr(self, 'target_end_ms') and self.target_end_ms is not None and \
-               current_pos_ms >= (self.target_end_ms - buffer_ms): # Check against target_end_ms
-                self.player.stop()
-                if hasattr(self, 'playback_timer'):
-                    self.playback_timer.stop()
-                if hasattr(self, 'playback_line'):
-                    self.playback_line.hide()
-                if logger: # Ensure logger is accessible
-                    logger.info(f"Playback reached target end time ~{self.target_end_ms}ms (current: {current_pos_ms}ms). Stopping.")
-        else:
-            # Player is not in PlayingState (could be Paused, Stopped, or error)
-            if hasattr(self, 'playback_timer'):
-                self.playback_timer.stop() # Stop timer if playback is not active
-
-            # Only hide line if player is fully stopped, not just paused
-            if hasattr(self, 'player') and self.player.state() == QMediaPlayer.StoppedState:
-                if hasattr(self, 'playback_line'):
-                    self.playback_line.hide()
-
-            if logger: # Ensure logger is accessible
-                logger.debug("Player not in PlayingState during playback timer update. Timer stopped.")
-
-    def keyPressEvent(self, event):
-        if event.key() == Qt.Key_Space:
-            player_state = self.player.state()
-            if logger:
-                logger.debug(f"Spacebar pressed. Player state: {player_state}")
-
-            if player_state == QMediaPlayer.PlayingState:
-                self.player.pause()
-                self.playback_timer.stop() # Stop line movement
-                if logger:
-                    logger.info("Playback paused via Spacebar. Playback line timer stopped.")
-            elif player_state == QMediaPlayer.PausedState:
-                self.player.play()
-                self.playback_timer.start(50) # Resume line movement
-                if logger:
-                    logger.info("Playback resumed via Spacebar. Playback line timer started.")
-            elif player_state == QMediaPlayer.StoppedState:
-                if logger:
-                    logger.info("Spacebar pressed while player is stopped. Attempting to play current sentence.")
-                current_item = self.sentence_list_widget.currentItem()
-                if current_item and self.current_audio_path:
-                    sentence_data = self.get_sentence_data(current_item)
-                    if sentence_data:
-                        start_ms = int(sentence_data.get('start_time', 0) * 1000)
-                        end_ms = int(sentence_data.get('end_time', 0) * 1000)
-                        if end_ms > start_ms:
-                            if logger:
-                                logger.info(f"Playing current sentence {sentence_data.get('sentence_id', 'N/A')} from {start_ms}ms to {end_ms}ms via Spacebar.")
-                            self.play_audio_segment(start_ms, end_ms)
-                        else:
-                            if logger:
-                                logger.warn(f"Current sentence {sentence_data.get('sentence_id', 'N/A')} has invalid start/end times ({start_ms}ms/{end_ms}ms) for playback via Spacebar.")
-                    else:
-                        if logger:
-                            logger.warn("No sentence data for current item to play via Spacebar.")
-                else:
-                    if logger:
-                        logger.info("No current sentence selected or audio path not available; doing nothing on Spacebar press while stopped.")
-            event.accept()
-        else:
-            super(MainWindow, self).keyPressEvent(event)
-
-    def update_playback_line_position(self):
-        if self.player.state() == QMediaPlayer.PlayingState:
-            current_pos_ms = self.player.position()
-            self.playback_line.setValue(current_pos_ms / 1000.0)
-
-            # Check if playback needs to stop based on target_end_ms
-            # Add a small buffer (e.g., 50-100ms) to target_end_ms because timer updates are not perfectly precise
-            # and player.position() might slightly exceed target_end_ms before this check runs.
-            # Also ensure target_end_ms is positive to avoid issues with uninitialized values.
-            if self.target_end_ms > 0 and current_pos_ms >= self.target_end_ms - 20: # 20ms buffer
-                if logger:
-                    logger.info(f"Playback reached or passed target end time {self.target_end_ms}ms (current: {current_pos_ms}ms). Stopping.")
-                self.player.stop() # This will trigger stateChanged, which should handle timer stop and line hide.
-                # Redundant safety, but can be useful:
-                self.playback_timer.stop()
-                self.playback_line.hide()
-        else:
-            # Player is not in PlayingState (e.g., paused or stopped)
-            self.playback_timer.stop() # Stop the timer
-            if self.player.state() == QMediaPlayer.StoppedState:
-                self.playback_line.hide() # Hide line if fully stopped
-            if logger:
-                logger.debug(f"Player not in PlayingState (current: {self.player.state()}) during playback timer update. Stopping timer. Line hidden if stopped.")
-
+# The play_audio_segment and on_media_status_changed methods that were
+# incorrectly placed at the module level after if __name__ == '__main__'
+# are also being removed from this location. They will be re-inserted
+# into the MainWindow class in the next step.
 
 if __name__ == '__main__':
     setup_logging() # Call setup_logging here
