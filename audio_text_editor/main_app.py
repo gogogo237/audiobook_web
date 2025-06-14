@@ -1,6 +1,7 @@
 import sys
 from PyQt5.QtWidgets import (QApplication, QMainWindow, QWidget, QVBoxLayout, QHBoxLayout,
-                             QListWidget, QPushButton, QInputDialog, QListWidgetItem, QTextEdit, QMessageBox) # Added QMessageBox
+                             QListWidget, QPushButton, QInputDialog, QListWidgetItem, QTextEdit, QMessageBox,
+                             QDialog, QDialogButtonBox) # Added QDialog, QDialogButtonBox
 from PyQt5.QtCore import Qt, QEvent
 from PyQt5 import QtWidgets # For QApplication.keyboardModifiers()
 import pyqtgraph as pg
@@ -13,7 +14,90 @@ import requests # Added
 import tempfile # Added
 
 # Constants
-FLASK_BACKEND_URL = "http://localhost:5002"
+FLASK_BACKEND_URL = "https://localhost:5002" # MODIFIED to https
+
+# --- Article Selection Dialog ---
+class ArticleSelectionDialog(QDialog):
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setWindowTitle("Select Article")
+        self.setModal(True) # Make it a modal dialog
+        self.resize(500, 400) # Adjusted size for better usability
+
+        main_layout = QVBoxLayout(self)
+
+        # Layout for book and article lists
+        lists_layout = QHBoxLayout()
+
+        # Book List
+        self.book_list_widget = QListWidget()
+        self.book_list_widget.currentItemChanged.connect(self.on_book_selected)
+        lists_layout.addWidget(self.book_list_widget, 1) # Stretch factor 1
+
+        # Article List
+        self.article_list_widget = QListWidget()
+        self.article_list_widget.itemDoubleClicked.connect(self.accept) # Double-click to accept
+        lists_layout.addWidget(self.article_list_widget, 2) # Stretch factor 2 (more space for articles)
+
+        main_layout.addLayout(lists_layout)
+
+        # Buttons
+        button_box = QDialogButtonBox(QDialogButtonBox.Ok | QDialogButtonBox.Cancel)
+        button_box.accepted.connect(self.accept)
+        button_box.rejected.connect(self.reject)
+        main_layout.addWidget(button_box)
+
+        self.setLayout(main_layout)
+
+        self.books_data = []
+        self.load_books_and_articles()
+
+    def load_books_and_articles(self):
+        url = f"{FLASK_BACKEND_URL}/api/books_with_articles"
+        QApplication.setOverrideCursor(Qt.WaitCursor)
+        try:
+            response = requests.get(url, timeout=10, verify=False)
+            response.raise_for_status()
+            self.books_data = response.json()
+
+            self.book_list_widget.clear()
+            for book_data in self.books_data:
+                item = QListWidgetItem(book_data.get('title', 'Untitled Book'))
+                item.setData(Qt.UserRole, book_data) # Store full book dict
+                self.book_list_widget.addItem(item)
+
+            if self.book_list_widget.count() > 0:
+                self.book_list_widget.setCurrentRow(0) # Select first book by default
+
+        except requests.exceptions.RequestException as e:
+            QMessageBox.critical(self, "API Error", f"Failed to load books/articles: {e}")
+            self.books_data = [] # Ensure it's empty on error
+        except Exception as e: # Catch any other unexpected errors
+            QMessageBox.critical(self, "Error", f"An unexpected error occurred: {e}")
+            self.books_data = []
+        finally:
+            QApplication.restoreOverrideCursor()
+
+
+    def on_book_selected(self, current_book_item, previous_book_item):
+        self.article_list_widget.clear()
+        if not current_book_item:
+            return
+
+        book_data = current_book_item.data(Qt.UserRole)
+        if book_data and 'articles' in book_data:
+            for article_data in book_data['articles']:
+                item = QListWidgetItem(article_data.get('filename', 'Untitled Article'))
+                item.setData(Qt.UserRole, article_data) # Store article dict (id, filename)
+                self.article_list_widget.addItem(item)
+
+    def get_selected_article_id(self):
+        selected_article_item = self.article_list_widget.currentItem()
+        if selected_article_item:
+            article_data = selected_article_item.data(Qt.UserRole)
+            if article_data and 'id' in article_data:
+                return article_data['id']
+        return None
 
 class MainWindow(QMainWindow):
     def __init__(self):
@@ -95,25 +179,41 @@ class MainWindow(QMainWindow):
         # self.load_article("test_article_1")
 
     def prompt_load_article(self):
-        article_id_str, ok = QInputDialog.getText(self, 'Load Article', 'Enter Article ID:')
-        if ok and article_id_str and article_id_str.strip():
-            self.load_article_from_backend(article_id_str.strip())
-        elif ok: # User pressed OK but input was empty
-            QMessageBox.warning(self, "Input Error", "Article ID cannot be empty.")
+        # QApplication.setOverrideCursor(Qt.WaitCursor) # Set cursor before dialog potentially lengthy ops
+        # try:
+        dialog = ArticleSelectionDialog(self)
+        result = dialog.exec_()
+
+        if result == QDialog.Accepted:
+            selected_article_id = dialog.get_selected_article_id()
+            if selected_article_id is not None:
+                # Wait cursor for load_article_from_backend is handled inside that method
+                self.load_article_from_backend(str(selected_article_id))
+            else:
+                # This case should ideally be prevented by disabling OK if no article selected,
+                # but as a fallback:
+                QMessageBox.warning(self, "Selection Error", "No article was selected from the dialog.")
+        # else: User cancelled
+        # finally:
+        #     QApplication.restoreOverrideCursor()
+
 
     def load_article_from_backend(self, article_id_str: str):
+        # Wait cursor is set at the beginning of this method
+        QApplication.setOverrideCursor(Qt.WaitCursor)
         try:
             article_id = int(article_id_str)
         except ValueError:
             QMessageBox.warning(self, "Invalid ID", f"Article ID must be an integer. You entered: '{article_id_str}'")
+            QApplication.restoreOverrideCursor() # Restore cursor on early exit
             return
 
         api_url = f"{FLASK_BACKEND_URL}/api/article/{article_id}"
         print(f"Attempting to load article from: {api_url}")
-        QApplication.setOverrideCursor(Qt.WaitCursor) # Show loading cursor
+        # QApplication.setOverrideCursor(Qt.WaitCursor) # Show loading cursor - MOVED to start of func
 
         try:
-            response = requests.get(api_url, timeout=10) # 10 second timeout
+            response = requests.get(api_url, timeout=10, verify=False) # MODIFIED to add verify=False
             response.raise_for_status() # Raises HTTPError for bad responses (4XX or 5XX)
 
             if response.status_code == 200:
@@ -124,9 +224,15 @@ class MainWindow(QMainWindow):
                 converted_mp3_url = article_api_data.get('converted_mp3_url')
 
                 if converted_mp3_url:
+                    # Ensure the URL for audio download is also HTTPS if it's from the same backend
+                    # Or, if it's an external URL, it might have its own scheme.
+                    # For now, assuming it's also from localhost and needs similar treatment.
+                    # If converted_mp3_url can be http, this might need adjustment or conditional verify=False.
+                    # However, url_for(_external=True) in Flask usually respects the request's scheme.
+                    # If the API endpoint itself is https, url_for should generate https URLs.
                     print(f"Attempting to download audio from: {converted_mp3_url}")
                     try:
-                        audio_response = requests.get(converted_mp3_url, stream=True, timeout=30) # 30s timeout for audio
+                        audio_response = requests.get(converted_mp3_url, stream=True, timeout=30, verify=False) # MODIFIED to add verify=False
                         audio_response.raise_for_status()
 
                         # Save to a temporary file
@@ -172,7 +278,7 @@ class MainWindow(QMainWindow):
             print(error_msg)
             QMessageBox.critical(self, "Unexpected Error", error_msg)
         finally:
-            QApplication.restoreOverrideCursor() # Reset cursor
+            QApplication.restoreOverrideCursor() # Reset cursor - THIS IS IMPORTANT HERE
 
     def process_loaded_article_data(self, article_api_data: dict, local_audio_path: str | None):
         """
