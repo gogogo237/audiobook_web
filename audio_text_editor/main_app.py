@@ -288,6 +288,34 @@ class MainWindow(QMainWindow):
                      logger.error(err_msg)
                  QMessageBox.critical(self, "Playback Error", "Could not load the audio for playback: No media found.")
 
+    def update_playback_line_position(self):
+        """
+        Called by the playback_timer to update the red line on the waveform.
+        Also stops playback when the target end time is reached.
+        """
+        if self.player.state() != QMediaPlayer.PlayingState:
+            return  # Don't do anything if not playing
+
+        current_pos_ms = self.player.position()
+
+        # Check if playback has reached or passed the end of the segment
+        # self.target_end_ms > 0 is a safety check to not stop immediately if it's 0
+        if self.target_end_ms > 0 and current_pos_ms >= self.target_end_ms:
+            if logger:
+                logger.info(f"Playback segment ended. Stopping at {current_pos_ms}ms (target was {self.target_end_ms}ms).")
+            self.player.stop() # This implicitly stops the timer and hides line via state/media change signals
+            # self.playback_timer.stop()
+            # self.playback_line.hide()
+            return  # Exit the function
+
+        # Update the line position on the waveform
+        position_sec = current_pos_ms / 1000.0
+        self.playback_line.setValue(position_sec)
+
+        # Ensure the line is visible while playing (it might be hidden by other actions)
+        if not self.playback_line.isVisible():
+            self.playback_line.show()
+
     def prompt_load_article(self):
         # QApplication.setOverrideCursor(Qt.WaitCursor) # Set cursor before dialog potentially lengthy ops
         # try:
@@ -1014,9 +1042,6 @@ if __name__ == '__main__':
     main_window.show()
     # Example: Automatically load an article on startup for quick testing
     # main_window.load_article("test_article_1")
-
-# Note: The more complete update_playback_line_position is defined earlier.
-# The simpler one that was here has been removed.
 
 # The play_audio_segment and on_media_status_changed methods that were
 # incorrectly placed at the module level after if __name__ == '__main__'
