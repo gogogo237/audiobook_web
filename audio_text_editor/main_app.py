@@ -1022,6 +1022,37 @@ if __name__ == '__main__':
                      logger.error(err_msg)
                  QMessageBox.critical(self, "Playback Error", "Could not load the audio for playback: No media found.")
 
+    def update_playback_line_position(self):
+        if hasattr(self, 'player') and self.player.state() == QMediaPlayer.PlayingState:
+            current_pos_ms = self.player.position()
+            if hasattr(self, 'playback_line'):
+                self.playback_line.setValue(current_pos_ms / 1000.0) # Convert ms to seconds for plot
+
+            # Check if playback needs to stop at target_end_ms
+            # Use a small buffer (e.g., 20-50ms) for precision with timer intervals
+            buffer_ms = 50
+            if hasattr(self, 'target_end_ms') and self.target_end_ms is not None and \
+               current_pos_ms >= (self.target_end_ms - buffer_ms): # Check against target_end_ms
+                self.player.stop()
+                if hasattr(self, 'playback_timer'):
+                    self.playback_timer.stop()
+                if hasattr(self, 'playback_line'):
+                    self.playback_line.hide()
+                if logger: # Ensure logger is accessible
+                    logger.info(f"Playback reached target end time ~{self.target_end_ms}ms (current: {current_pos_ms}ms). Stopping.")
+        else:
+            # Player is not in PlayingState (could be Paused, Stopped, or error)
+            if hasattr(self, 'playback_timer'):
+                self.playback_timer.stop() # Stop timer if playback is not active
+
+            # Only hide line if player is fully stopped, not just paused
+            if hasattr(self, 'player') and self.player.state() == QMediaPlayer.StoppedState:
+                if hasattr(self, 'playback_line'):
+                    self.playback_line.hide()
+
+            if logger: # Ensure logger is accessible
+                logger.debug("Player not in PlayingState during playback timer update. Timer stopped.")
+
     def keyPressEvent(self, event):
         if event.key() == Qt.Key_Space:
             player_state = self.player.state()
