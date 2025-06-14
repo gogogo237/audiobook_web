@@ -863,3 +863,84 @@ if __name__ == '__main__':
 
     app.run(debug=True, host='0.0.0.0', port=5002, ssl_context='adhoc')
     app.logger.info("Flask app is now running with ad-hoc SSL (HTTPS).")
+
+
+# --- API Endpoints ---
+
+@app.route('/api/books_with_articles', methods=['GET'])
+def api_books_with_articles():
+    app.logger.info("API: Request received for /api/books_with_articles")
+    try:
+        books = db_manager.get_all_books(app_logger=app.logger)
+        response_data = []
+        for book_row in books:
+            book_dict = dict(book_row) # Convert SQLite Row to dict
+            articles = db_manager.get_articles_for_book(book_dict['id'], app_logger=app.logger)
+            articles_list = []
+            for article_row in articles:
+                article_dict = dict(article_row) # Convert SQLite Row to dict
+                articles_list.append({
+                    "id": article_dict['id'],
+                    "filename": article_dict['filename']
+                })
+            response_data.append({
+                "id": book_dict['id'],
+                "title": book_dict['title'],
+                "articles": articles_list
+            })
+        app.logger.info(f"API: Successfully fetched {len(response_data)} books with their articles.")
+        return jsonify(response_data)
+    except Exception as e:
+        app.logger.error(f"API: Error in /api/books_with_articles: {e}", exc_info=True)
+        return jsonify({"error": "Failed to fetch books with articles", "details": str(e)}), 500
+
+
+@app.route('/api/article/<int:article_id>', methods=['GET'])
+def api_article_detail(article_id):
+    app.logger.info(f"API: Request received for /api/article/{article_id}")
+    try:
+        article = db_manager.get_article_by_id(article_id, app_logger=app.logger)
+        if not article:
+            app.logger.warning(f"API: Article with ID {article_id} not found.")
+            return jsonify({"error": "Article not found"}), 404
+
+        article_dict = dict(article) # Convert SQLite Row to dict
+
+        sentences = db_manager.get_sentences_for_article(article_id, app_logger=app.logger)
+        sentences_list = []
+        for sentence_row in sentences:
+            sentences_list.append(dict(sentence_row)) # Convert each sentence Row to dict
+
+        # Construct the full URL for the MP3 download
+        # Ensure this route exists and works as expected for generating the URL.
+        # The `download_mp3_for_article` route is already defined in this file.
+        converted_mp3_url = None
+        if article_dict.get('converted_mp3_path'): # Check if MP3 path exists
+            try:
+                converted_mp3_url = url_for('download_mp3_for_article', article_id=article_id, _external=True)
+            except Exception as url_gen_e:
+                app.logger.error(f"API: Could not generate URL for download_mp3_for_article for article {article_id}: {url_gen_e}", exc_info=True)
+                # If URL generation fails, we might still proceed but log it, or return an error depending on requirements.
+                # For now, we'll let it be None and the client can handle it.
+
+        response_data = {
+            "id": article_dict['id'],
+            "filename": article_dict['filename'],
+            "book_id": article_dict['book_id'],
+            "converted_mp3_url": converted_mp3_url,
+            "sentences": sentences_list
+            # Add any other fields from article_dict that are directly needed at the top level
+            # e.g., 'upload_timestamp', 'processed_srt_path' if they are useful for the API consumer
+        }
+
+        # Optionally, include other direct fields from article_dict if relevant
+        # For example:
+        # response_data['processed_srt_path'] = article_dict.get('processed_srt_path')
+        # response_data['upload_timestamp'] = article_dict.get('upload_timestamp')
+
+
+        app.logger.info(f"API: Successfully fetched details for article {article_id}.")
+        return jsonify(response_data)
+    except Exception as e:
+        app.logger.error(f"API: Error in /api/article/{article_id}: {e}", exc_info=True)
+        return jsonify({"error": "Failed to fetch article details", "details": str(e)}), 500

@@ -4,11 +4,16 @@ from PyQt5.QtWidgets import (QApplication, QMainWindow, QWidget, QVBoxLayout, QH
 from PyQt5.QtCore import Qt, QEvent
 from PyQt5 import QtWidgets # For QApplication.keyboardModifiers()
 import pyqtgraph as pg
-from db_mock import get_article_data, save_article_data # Import save_article_data
+# from db_mock import get_article_data, save_article_data # Import save_article_data
 import librosa
 import numpy as np
 import os # For checking file path
 import time # For generating unique sentence IDs
+import requests # Added
+import tempfile # Added
+
+# Constants
+FLASK_BACKEND_URL = "http://localhost:5002"
 
 class MainWindow(QMainWindow):
     def __init__(self):
@@ -41,14 +46,15 @@ class MainWindow(QMainWindow):
         button_layout.addWidget(self.load_article_button)
 
         self.save_article_button = QPushButton("Save Article")
-        self.save_article_button.clicked.connect(self.save_article)
+        # self.save_article_button.clicked.connect(self.save_article) # Commented out
+        self.save_article_button.setEnabled(False) # Disabled
         button_layout.addWidget(self.save_article_button)
 
         button_layout.addStretch() # Pushes buttons to the left
         overall_layout.addLayout(button_layout)
 
-        # Panes layout (Horizontal)
-        panes_layout = QHBoxLayout()
+        # Panes layout (Vertical) - MODIFIED
+        panes_layout = QVBoxLayout() # MODIFIED
 
         # --- Left Pane (Sentences List, Editor, Update Button) ---
         left_pane_layout = QVBoxLayout()
@@ -67,10 +73,11 @@ class MainWindow(QMainWindow):
 
         left_pane_widget = QWidget()
         left_pane_widget.setLayout(left_pane_layout)
-        panes_layout.addWidget(left_pane_widget, 1) # Left pane gets 1 part of stretch
+        panes_layout.addWidget(left_pane_widget, 3) # MODIFIED stretch factor
 
         # --- Right Pane (Waveform Display) ---
         self.waveform_plot = pg.PlotWidget()
+        self.waveform_plot.setMaximumHeight(250) # ADDED maximum height
         # Add a placeholder plot (will be overwritten on load)
         self.waveform_plot.plot([0], [0], pen='w')
         # Connect click signal for splitting
@@ -79,7 +86,7 @@ class MainWindow(QMainWindow):
             vb.scene().sigMouseClicked.connect(self.on_waveform_ctrl_clicked)
             # Note: pyqtgraph MouseClickEvent is simple, might not directly give button.
             # We'll rely on keyboard modifiers for Ctrl.
-        panes_layout.addWidget(self.waveform_plot, 2) # Assign stretch factor
+        panes_layout.addWidget(self.waveform_plot, 1) # MODIFIED stretch factor
 
         overall_layout.addLayout(panes_layout)
         central_widget.setLayout(overall_layout)
@@ -88,60 +95,145 @@ class MainWindow(QMainWindow):
         # self.load_article("test_article_1")
 
     def prompt_load_article(self):
-        # For now, we'll hardcode the article ID.
-        # Later, this could use QInputDialog:
-        # article_id, ok = QInputDialog.getText(self, 'Load Article', 'Enter Article ID:')
-        # if ok and article_id:
-        #     self.load_article(article_id)
-        self.load_article("test_article_1")
+        article_id_str, ok = QInputDialog.getText(self, 'Load Article', 'Enter Article ID:')
+        if ok and article_id_str and article_id_str.strip():
+            self.load_article_from_backend(article_id_str.strip())
+        elif ok: # User pressed OK but input was empty
+            QMessageBox.warning(self, "Input Error", "Article ID cannot be empty.")
 
-    def load_article(self, article_id: str):
-        article_data = get_article_data(article_id)
-        if not article_data:
-            print(f"Error: Article ID '{article_id}' not found.")
-            # Optionally, show a QMessageBox to the user
+    def load_article_from_backend(self, article_id_str: str):
+        try:
+            article_id = int(article_id_str)
+        except ValueError:
+            QMessageBox.warning(self, "Invalid ID", f"Article ID must be an integer. You entered: '{article_id_str}'")
             return
 
-        self.current_article_id = article_data['article_id']
-        self.current_title = article_data['title']
-        self.current_audio_path = article_data['audio_file_path']
+        api_url = f"{FLASK_BACKEND_URL}/api/article/{article_id}"
+        print(f"Attempting to load article from: {api_url}")
+        QApplication.setOverrideCursor(Qt.WaitCursor) # Show loading cursor
+
+        try:
+            response = requests.get(api_url, timeout=10) # 10 second timeout
+            response.raise_for_status() # Raises HTTPError for bad responses (4XX or 5XX)
+
+            if response.status_code == 200:
+                article_api_data = response.json()
+                print(f"Successfully fetched data for article ID: {article_id}")
+
+                local_audio_path = None
+                converted_mp3_url = article_api_data.get('converted_mp3_url')
+
+                if converted_mp3_url:
+                    print(f"Attempting to download audio from: {converted_mp3_url}")
+                    try:
+                        audio_response = requests.get(converted_mp3_url, stream=True, timeout=30) # 30s timeout for audio
+                        audio_response.raise_for_status()
+
+                        # Save to a temporary file
+                        with tempfile.NamedTemporaryFile(delete=False, suffix='.mp3') as tmp_audio_file:
+                            for chunk in audio_response.iter_content(chunk_size=8192):
+                                tmp_audio_file.write(chunk)
+                            local_audio_path = tmp_audio_file.name
+                        print(f"Audio downloaded and saved to temporary file: {local_audio_path}")
+                    except requests.exceptions.RequestException as audio_req_ex:
+                        error_msg = f"Error downloading audio file: {audio_req_ex}"
+                        print(error_msg)
+                        QMessageBox.warning(self, "Audio Download Error", error_msg)
+                        # Proceed with loading article data even if audio fails
+                    except Exception as audio_ex: # Catch any other exception during download/save
+                        error_msg = f"An unexpected error occurred while downloading audio: {audio_ex}"
+                        print(error_msg)
+                        QMessageBox.critical(self, "Audio Download Failed", error_msg)
+                else:
+                    QMessageBox.information(self, "No Audio", "Article data loaded, but no audio URL was provided by the backend.")
+                    print("No converted_mp3_url provided in API response.")
+
+                self.process_loaded_article_data(article_api_data, local_audio_path)
+
+            # response.raise_for_status() should handle this, but as a fallback:
+            # else:
+            #     error_msg = f"Failed to load article. Status: {response.status_code}, Response: {response.text}"
+            #     print(error_msg)
+            #     QMessageBox.warning(self, "Load Error", error_msg)
+
+        except requests.exceptions.HTTPError as http_err:
+            error_message = f"HTTP error occurred: {http_err} - {http_err.response.text if http_err.response else 'No response body'}"
+            print(error_message)
+            if http_err.response is not None and http_err.response.status_code == 404:
+                 QMessageBox.warning(self, "Not Found", f"Article with ID '{article_id}' not found on the server.")
+            else:
+                 QMessageBox.critical(self, "API Error", error_message)
+        except requests.exceptions.RequestException as req_ex: # Covers connection errors, timeouts, etc.
+            error_msg = f"Failed to connect to backend or network error: {req_ex}"
+            print(error_msg)
+            QMessageBox.critical(self, "Connection Error", error_msg)
+        except Exception as e: # Catch any other unexpected errors
+            error_msg = f"An unexpected error occurred: {e}"
+            print(error_msg)
+            QMessageBox.critical(self, "Unexpected Error", error_msg)
+        finally:
+            QApplication.restoreOverrideCursor() # Reset cursor
+
+    def process_loaded_article_data(self, article_api_data: dict, local_audio_path: str | None):
+        """
+        Processes the fetched article data and populates the UI.
+        This method replaces the old load_article method's logic after data retrieval.
+        """
+        self.current_article_id = article_api_data.get('id')
+        self.current_title = article_api_data.get('filename', f"Article {self.current_article_id}") # Fallback title
+        self.current_audio_path = local_audio_path # This is now an absolute path to a temp file or None
 
         self.setWindowTitle(f"Audio-Text Editor - {self.current_title}")
         self.sentence_list_widget.clear()
+        self.sentence_editor_textedit.clear() # Clear editor as well
 
-        # Sort sentences by order_id before displaying
-        sorted_sentences = sorted(article_data['sentences'], key=lambda s: s['order_id'])
+        api_sentences = article_api_data.get('sentences', [])
+        if not api_sentences:
+            QMessageBox.information(self, "No Sentences", f"Article '{self.current_title}' loaded, but it contains no sentences.")
 
-        for sentence_data in sorted_sentences:
-            # Consistent item text format
-            item_text = f"{sentence_data['order_id']}: {sentence_data['text']}"
+        # Sort sentences by paragraph_index, then sentence_index_in_paragraph (if available from API)
+        # For now, we assume sentences from API are already in correct order or use a simple counter.
+        # If API provides paragraph_index and sentence_index_in_paragraph, use them:
+        # sorted_sentences = sorted(api_sentences, key=lambda s: (s.get('paragraph_index', 0), s.get('sentence_index_in_paragraph', 0)))
+        # For now, let's just use the order they come in and generate order_id.
+
+        for idx, sentence_api_data in enumerate(api_sentences):
+            order_id = idx + 1 # Generate order_id sequentially
+
+            # Map API fields to internal data structure
+            start_time_ms = sentence_api_data.get('start_time_ms')
+            end_time_ms = sentence_api_data.get('end_time_ms')
+
+            sentence_data_internal = {
+                'sentence_id': sentence_api_data.get('id'), # Use DB sentence ID
+                'text': sentence_api_data.get('english_text', ''), # Use english_text
+                'start_time': start_time_ms / 1000.0 if start_time_ms is not None else 0.0,
+                'end_time': end_time_ms / 1000.0 if end_time_ms is not None else 0.0,
+                'order_id': order_id
+                # Add other fields from sentence_api_data if needed by the editor later
+                # e.g. 'chinese_text', 'audio_part_index' etc.
+            }
+
+            item_text = f"{sentence_data_internal['order_id']}: {sentence_data_internal['text']}"
             list_item = QListWidgetItem(item_text)
-
-            # Store the full sentence data dictionary in the item
-            # This sentence_data comes from db_mock and includes all required keys:
-            # sentence_id, text, start_time, end_time, order_id
-            list_item.setData(Qt.UserRole, sentence_data)
+            list_item.setData(Qt.UserRole, sentence_data_internal)
             self.sentence_list_widget.addItem(list_item)
 
-        print(f"Loaded article: {self.current_title}")
-        print(f"Audio path: {self.current_audio_path}")
-        # You could add a print statement here to show sentences loaded for debugging in headless env
-        # for i in range(self.sentence_list_widget.count()):
-        #    item = self.sentence_list_widget.item(i)
-        #    data = item.data(Qt.UserRole)
-        #    print(data['text'])
+        print(f"Processed article data: {self.current_title}")
+        if self.current_audio_path:
+            print(f"Audio available at temporary path: {self.current_audio_path}")
+        else:
+            print("No local audio path available for this article.")
 
-        # Load and display waveform
-        self.load_waveform() # This loads data but doesn't plot the initial view based on selection yet
+        self.load_waveform()
 
-        # After loading sentences and waveform, select the first sentence
         if self.sentence_list_widget.count() > 0:
             first_item = self.sentence_list_widget.item(0)
-            if first_item: # Ensure item exists
+            if first_item:
                  self.sentence_list_widget.setCurrentItem(first_item)
-        # self.on_sentence_selection_changed will be called due to setCurrentItem,
-        # so initial view and markers will be set.
-        # If no sentences, on_sentence_selection_changed(None, None) should handle it.
+        else: # No sentences, so ensure waveform markers are cleared
+            self.on_sentence_selection_changed(None, None)
+
 
     def load_waveform(self):
         # Clear previous waveform data
@@ -149,59 +241,44 @@ class MainWindow(QMainWindow):
         self.current_waveform_sr = None
         self.waveform_plot.clear() # Clear the plot widget itself
 
-        if not self.current_audio_path:
-            print("Error: Audio path is not set.")
-            # self.waveform_plot.clear() # Already cleared
+        if not self.current_audio_path: # This is now an absolute path or None
+            print("No audio path available to load waveform.")
             self.waveform_plot.setLabel('left', 'Amplitude')
             self.waveform_plot.setLabel('bottom', 'Time', units='s')
             self.waveform_plot.plot([0], [0], pen=None, symbol='o') # Plot a single point
             return
 
-        # Construct the full path to the audio file, assuming it's in the same directory as the script or project root
-        # For the subtask, sample_audio.wav is in audio_text_editor directory.
-        # If main_app.py is in audio_text_editor, then self.current_audio_path can be relative like "sample_audio.wav"
-        # If running from outside, an absolute path or more robust relative path might be needed.
-        # For now, assume current_audio_path is directly usable or relative to the app's execution dir.
-
-        # Construct the full path to the audio file.
-        # __file__ is the path to the current script (main_app.py)
-        # os.path.dirname(__file__) is the directory audio_text_editor/
-        # self.current_audio_path is "sample_audio.wav"
-        # So, this should correctly point to audio_text_editor/sample_audio.wav
-        audio_file_to_load = os.path.join(os.path.dirname(__file__), self.current_audio_path)
+        audio_file_to_load = self.current_audio_path # Use the absolute path directly
 
         try:
-            print(f"Attempting to load audio from: {audio_file_to_load}")
-            # Ensure the file exists before trying to load
-            if not os.path.exists(audio_file_to_load):
-                print(f"Error: Audio file not found at {audio_file_to_load}")
-                # self.waveform_plot.clear() # Already cleared
+            print(f"Attempting to load audio from temporary file: {audio_file_to_load}")
+            if not os.path.exists(audio_file_to_load): # Should exist if download was successful
+                print(f"Error: Temporary audio file not found at {audio_file_to_load}")
                 self.waveform_plot.setLabel('left', 'Amplitude')
                 self.waveform_plot.setLabel('bottom', 'Time', units='s')
                 self.waveform_plot.plot([0],[0], pen=None, symbol='o')
+                # Optionally, inform user via QMessageBox, but console log might be enough for this error
                 return
 
             self.current_waveform_y, self.current_waveform_sr = librosa.load(audio_file_to_load, sr=None, mono=True)
             time_axis = np.arange(0, len(self.current_waveform_y)) / self.current_waveform_sr
 
-            # self.waveform_plot.clear() # Already cleared
-            self.waveform_plot.plot(time_axis, self.current_waveform_y, pen='w') # Plot the full waveform initially
+            self.waveform_plot.plot(time_axis, self.current_waveform_y, pen='w')
             self.waveform_plot.setLabel('left', 'Amplitude')
             self.waveform_plot.setLabel('bottom', 'Time', units='s')
-            print(f"Successfully loaded waveform for {self.current_audio_path}")
+            print(f"Successfully loaded waveform from {self.current_audio_path}")
 
-        except FileNotFoundError:
-            print(f"Error: Audio file not found at {audio_file_to_load}.")
-            # self.waveform_plot.clear() # Already cleared
+        except Exception as e: # Catch librosa.load errors or other issues
+            error_msg = f"Error loading audio from temporary file {self.current_audio_path}: {e}"
+            print(error_msg)
+            QMessageBox.critical(self, "Waveform Load Error", error_msg)
             self.waveform_plot.setLabel('left', 'Amplitude')
             self.waveform_plot.setLabel('bottom', 'Time', units='s')
             self.waveform_plot.plot([0],[0], pen=None, symbol='o')
-        except Exception as e:
-            print(f"Error loading audio file {self.current_audio_path}: {e}")
-            # self.waveform_plot.clear() # Already cleared
-            self.waveform_plot.setLabel('left', 'Amplitude')
-            self.waveform_plot.setLabel('bottom', 'Time', units='s')
-            self.waveform_plot.plot([0],[0], pen=None, symbol='o')
+        # No finally block to delete temp file here, as it might be needed for playback later
+        # It should be cleaned up when a new article is loaded or app closes.
+        # However, self.current_audio_path stores this path, so we'd need a list of temp files to clean up.
+        # For simplicity now, let OS handle temp file deletion on reboot, or implement explicit cleanup later.
 
     def on_sentence_selection_changed(self, current_item: QListWidgetItem, previous_item: QListWidgetItem):
         # Remove previous markers first, regardless of current_item
@@ -485,6 +562,8 @@ class MainWindow(QMainWindow):
         # 5. Select the newly created item to trigger UI updates (waveform zoom, markers)
         self.sentence_list_widget.setCurrentItem(new_item)
         print(f"Sentence {original_sentence_data['sentence_id']} split. New sentence {new_sentence_id} created.")
+        # TODO: Need to handle cleanup of old self.current_audio_path if a new one is loaded.
+        # A list of temp files could be maintained, and cleaned on app exit or new load.
 
     def update_order_ids(self):
         """
@@ -496,33 +575,36 @@ class MainWindow(QMainWindow):
             if item:
                 data = self.get_sentence_data(item)
                 if data:
-                    if data['order_id'] != (i + 1): # Only update if necessary
+                    if data.get('order_id') != (i + 1): # Only update if necessary
                         data_copy = data.copy()
                         data_copy['order_id'] = i + 1
                         self.update_sentence_data(item, data_copy)
         print("Order IDs updated.")
 
     def save_article(self):
-        if not self.current_article_id:
-            QMessageBox.warning(self, "Warning", "No article loaded to save.")
-            return
-
-        all_sentences = self.get_all_sentences_data()
-        if not all_sentences: # Or check if any changes were made
-            QMessageBox.information(self, "Info", "No sentences to save or no changes made.")
-            # return # Allow saving even if empty, to effectively clear sentences if desired.
-
-        print(f"Attempting to save article: {self.current_article_id} with {len(all_sentences)} sentences.")
-
-        # Ensure db_mock.save_article_data is imported
-        success, message = save_article_data(self.current_article_id, all_sentences)
-
-        if success:
-            QMessageBox.information(self, "Success", f"Article '{self.current_article_id}' saved successfully: {message}")
-            print(f"Save successful: {message}")
-        else:
-            QMessageBox.critical(self, "Error", f"Failed to save article '{self.current_article_id}': {message}")
-            print(f"Save failed: {message}")
+        # Saving is disabled when fetching from backend for now.
+        QMessageBox.information(self, "Save Disabled", "Saving changes back to the server is not implemented in this version.")
+        print("Save action called, but saving is currently disabled/not implemented for backend integration.")
+        # if not self.current_article_id:
+        #     QMessageBox.warning(self, "Warning", "No article loaded to save.")
+        #     return
+        #
+        # all_sentences = self.get_all_sentences_data()
+        # if not all_sentences: # Or check if any changes were made
+        #     QMessageBox.information(self, "Info", "No sentences to save or no changes made.")
+        #     # return # Allow saving even if empty, to effectively clear sentences if desired.
+        #
+        # print(f"Attempting to save article: {self.current_article_id} with {len(all_sentences)} sentences.")
+        #
+        # # Ensure db_mock.save_article_data is imported
+        # success, message = save_article_data(self.current_article_id, all_sentences)
+        #
+        # if success:
+        #     QMessageBox.information(self, "Success", f"Article '{self.current_article_id}' saved successfully: {message}")
+        #     print(f"Save successful: {message}")
+        # else:
+        #     QMessageBox.critical(self, "Error", f"Failed to save article '{self.current_article_id}': {message}")
+        #     print(f"Save failed: {message}")
 
     # Helper methods for sentence data management
     def get_sentence_data(self, item: QListWidgetItem) -> dict | None:
