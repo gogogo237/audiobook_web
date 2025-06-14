@@ -845,28 +845,6 @@ def serve_mp3_part(article_id, part_index):
                                as_attachment=should_download, download_name=download_name if should_download else None)
 
 
-if __name__ == '__main__':
-    app.logger.info(f"Starting Flask development server. Debug mode: {app.debug}")
-    aeneas_path_env = os.environ.get("AENEAS_PYTHON_PATH")
-    if aeneas_path_env:
-       app.config['AENEAS_PYTHON_PATH'] = aeneas_path_env
-    app.logger.info(f"AENEAS_PYTHON_PATH is set to: {app.config['AENEAS_PYTHON_PATH']}")
-    
-    # Check Kokoro voice config one last time before run
-    if tts_utils.kokoro_available and \
-       not tts_utils.check_voices_configured(app.config['KOKORO_MANDARIN_VOICE'], app.config['KOKORO_ENGLISH_VOICE'], app.logger):
-        app.logger.warning("#####################################################################")
-        app.logger.warning("## KOKORO VOICES ARE LIKELY MISCONFIGURED IN app.py!                 ##")
-        app.logger.warning("## Please set KOKORO_MANDARIN_VOICE and KOKORO_ENGLISH_VOICE.        ##")
-        app.logger.warning("## TTS functionality will likely fail until this is corrected.       ##")
-        app.logger.warning("#####################################################################")
-
-    app.run(debug=True, host='0.0.0.0', port=5002, ssl_context='adhoc')
-    app.logger.info("Flask app is now running with ad-hoc SSL (HTTPS).")
-
-
-# --- API Endpoints ---
-
 @app.route('/api/books_with_articles', methods=['GET'])
 def api_books_with_articles():
     app.logger.info("API: Request received for /api/books_with_articles")
@@ -944,3 +922,24 @@ def api_article_detail(article_id):
     except Exception as e:
         app.logger.error(f"API: Error in /api/article/{article_id}: {e}", exc_info=True)
         return jsonify({"error": "Failed to fetch article details", "details": str(e)}), 500
+
+
+
+if __name__ == '__main__':
+    app.logger.info(f"Starting Flask development server. Debug mode: {app.debug}")
+    aeneas_path_env = os.environ.get("AENEAS_PYTHON_PATH")
+    if aeneas_path_env:
+       app.config['AENEAS_PYTHON_PATH'] = aeneas_path_env
+    app.logger.info(f"AENEAS_PYTHON_PATH is set to: {app.config['AENEAS_PYTHON_PATH']}")
+    
+    # Check Kokoro voice config one last time before run
+    if tts_utils.kokoro_available and \
+       not tts_utils.check_voices_configured(app.config['KOKORO_MANDARIN_VOICE'], app.config['KOKORO_ENGLISH_VOICE'], app.logger):
+        app.logger.warning("#####################################################################")
+        app.logger.warning("## KOKORO VOICES ARE LIKELY MISCONFIGURED IN app.py!                 ##")
+        app.logger.warning("## Please set KOKORO_MANDARIN_VOICE and KOKORO_ENGLISH_VOICE.        ##")
+        app.logger.warning("## TTS functionality will likely fail until this is corrected.       ##")
+        app.logger.warning("#####################################################################")
+
+    app.run(debug=True, host='0.0.0.0', port=5002, ssl_context='adhoc')
+    app.logger.info("Flask app is now running with ad-hoc SSL (HTTPS).")
