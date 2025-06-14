@@ -4,7 +4,8 @@ import logging.handlers
 from PyQt5.QtWidgets import (QApplication, QMainWindow, QWidget, QVBoxLayout, QHBoxLayout,
                              QListWidget, QPushButton, QInputDialog, QListWidgetItem, QTextEdit, QMessageBox,
                              QDialog, QDialogButtonBox) # Added QDialog, QDialogButtonBox
-from PyQt5.QtCore import Qt, QEvent
+from PyQt5.QtCore import Qt, QEvent, QUrl, QTimer
+from PyQt5.QtMultimedia import QMediaPlayer, QMediaContent
 from PyQt5 import QtWidgets # For QApplication.keyboardModifiers()
 import pyqtgraph as pg
 # from db_mock import get_article_data, save_article_data # Import save_article_data
@@ -119,6 +120,21 @@ class MainWindow(QMainWindow):
         self.current_sentence_start_line = None
         self.current_sentence_end_line = None
 
+        # Audio Player Setup
+        self.player = QMediaPlayer(None, QMediaPlayer.StreamPlayback)
+        self.player.error.connect(self.handle_player_error)
+
+        self.playback_timer = QTimer()
+        self.playback_timer.timeout.connect(self.update_playback_line_position)
+
+        self._media_status_connected = False # To ensure signal is connected only once
+        self.target_start_ms = 0
+        self.target_end_ms = 0
+
+        # Playback line on waveform
+        self.playback_line = pg.InfiniteLine(angle=90, pen=pg.mkPen('r', width=2), movable=False)
+        self.playback_line.hide() # Initially hidden
+
         central_widget = QWidget(self)
         self.setCentralWidget(central_widget)
 
@@ -169,9 +185,12 @@ class MainWindow(QMainWindow):
         # Connect click signal for splitting
         vb = self.waveform_plot.getViewBox()
         if vb: # Ensure viewBox is obtained
-            vb.scene().sigMouseClicked.connect(self.on_waveform_ctrl_clicked)
+            vb.scene().sigMouseClicked.connect(self.on_waveform_mouse_clicked)
             # Note: pyqtgraph MouseClickEvent is simple, might not directly give button.
             # We'll rely on keyboard modifiers for Ctrl.
+
+        # Add playback line to the plot AFTER other items if layering matters, though usually it's fine.
+        self.waveform_plot.addItem(self.playback_line)
         panes_layout.addWidget(self.waveform_plot, 1) # MODIFIED stretch factor
 
         overall_layout.addLayout(panes_layout)
@@ -179,6 +198,17 @@ class MainWindow(QMainWindow):
 
         # Load a default article for testing if needed
         # self.load_article("test_article_1")
+
+    def handle_player_error(self, error):
+        # global logger # Access the global logger if needed and initialized
+        if logger:
+           logger.error(f"MediaPlayer Error: {error} - {self.player.errorString()}", exc_info=False) # exc_info can be noisy for simple errors
+        else:
+            print(f"MediaPlayer Error: {error} - {self.player.errorString()}")
+
+        self.playback_timer.stop()
+        self.playback_line.hide()
+        QMessageBox.critical(self, "Playback Error", f"Error during playback: {self.player.errorString()}")
 
     def prompt_load_article(self):
         # QApplication.setOverrideCursor(Qt.WaitCursor) # Set cursor before dialog potentially lengthy ops
@@ -637,12 +667,7 @@ class MainWindow(QMainWindow):
         self.update_sentence_data(current_item, updated_data)
         print(f"Updated sentence {updated_data['sentence_id']} with new text: '{new_text}'")
 
-    def on_waveform_ctrl_clicked(self, mouse_event):
-        # Check for Control key modifier
-        modifiers = QtWidgets.QApplication.keyboardModifiers()
-        if not (modifiers & Qt.ControlModifier): # Use bitwise AND for checking modifier flags
-            return
-
+    def on_waveform_mouse_clicked(self, mouse_event):
         # Check if the click was within the plot area and get the time
         # mouse_event is a pyqtgraph.GraphicsScene.MouseClickEvent
         # It has pos() (QPointF in item coords) and scenePos() (QPointF in scene coords)
@@ -658,8 +683,8 @@ class MainWindow(QMainWindow):
         view_coords = plot_item.getViewBox().mapSceneToView(mouse_event.scenePos())
         click_time = round(view_coords.x(), 3)
 
-        if click_time < 0 : # Clicked before the start of the audio
-             return
+        if click_time < 0: # Clicked before the start of the audio
+            return
         if self.current_waveform_y is not None and self.current_waveform_sr is not None:
             max_time = len(self.current_waveform_y) / self.current_waveform_sr
             if click_time > max_time: # Clicked after the end of the audio
@@ -667,7 +692,42 @@ class MainWindow(QMainWindow):
         else: # No waveform loaded
             return
 
-        # Identify the sentence under the click
+        modifiers = QtWidgets.QApplication.keyboardModifiers()
+
+        if modifiers & Qt.ControlModifier:
+            # --- Ctrl-Click: Split Sentence Logic ---
+            if logger:
+                logger.debug(f"Ctrl-Click detected at {click_time}s for splitting.")
+            self.handle_split_action(click_time)
+        else:
+            # --- Simple Click: Playback Logic ---
+            if logger:
+                logger.info(f"Simple click detected at {click_time}s for playback.")
+
+            playback_initiated = False
+            for i in range(self.sentence_list_widget.count()):
+                item = self.sentence_list_widget.item(i)
+                sentence_data = self.get_sentence_data(item)
+                if sentence_data:
+                    sentence_start_sec = sentence_data.get('start_time', 0)
+                    sentence_end_sec = sentence_data.get('end_time', 0)
+
+                    if sentence_start_sec <= click_time < sentence_end_sec:
+                        start_playback_ms = int(click_time * 1000)
+                        end_playback_ms = int(sentence_end_sec * 1000)
+                        if logger:
+                            logger.info(f"Simple click: Initiating playback from {click_time:.3f}s (sentence {sentence_data.get('sentence_id', 'N/A')}) to sentence end {sentence_end_sec:.3f}s.")
+                        self.play_audio_segment(start_playback_ms, end_playback_ms)
+                        playback_initiated = True
+                        break
+
+            if not playback_initiated and logger:
+                logger.info(f"Simple click at {click_time:.3f}s is not within any sentence's time range. No playback initiated.")
+
+    def handle_split_action(self, click_time: float):
+        """Handles the logic for splitting a sentence at the given click_time."""
+        # This method encapsulates the previous Ctrl-Click logic.
+        # Identify the sentence under the click (this part is duplicated from the original on_waveform_ctrl_clicked)
         original_item = None
         original_sentence_data = None
         original_idx = -1
@@ -682,16 +742,25 @@ class MainWindow(QMainWindow):
                 break
 
         if not original_sentence_data:
-            print(f"Ctrl+Click at {click_time}s did not fall within any sentence.")
+            if logger:
+                logger.warn(f"Split action: Click at {click_time:.3f}s did not fall within any sentence.")
+            else:
+                print(f"Ctrl+Click at {click_time}s did not fall within any sentence.")
             return
 
         # Validation: Ensure click_time is not too close to existing boundaries
         buffer = 0.050 # 50ms buffer, can be adjusted
         if not (original_sentence_data['start_time'] + buffer < click_time < original_sentence_data['end_time'] - buffer):
-            print(f"Split time {click_time}s is too close to sentence boundaries or would create a very short sentence.")
+            if logger:
+                logger.warn(f"Split time {click_time:.3f}s is too close to sentence boundaries of sentence {original_sentence_data['sentence_id']} or would create a very short sentence. Min allowed: {original_sentence_data['start_time'] + buffer}, Max allowed: {original_sentence_data['end_time'] - buffer}")
+            else:
+                print(f"Split time {click_time}s is too close to sentence boundaries or would create a very short sentence.")
             return
 
-        print(f"Ctrl+Click detected at {click_time}s within sentence {original_sentence_data['sentence_id']}.")
+        if logger:
+            logger.info(f"Splitting sentence {original_sentence_data['sentence_id']} at {click_time:.3f}s.")
+        else:
+            print(f"Ctrl+Click detected at {click_time}s within sentence {original_sentence_data['sentence_id']}.")
 
         # 1. Update original sentence
         updated_original_data = original_sentence_data.copy()
@@ -854,6 +923,170 @@ def handle_exception(exc_type, exc_value, exc_traceback):
     # It's important to also call the default excepthook to ensure Python's normal error output
     # is still produced, especially for console applications.
     sys.__excepthook__(exc_type, exc_value, exc_traceback)
+
+
+if __name__ == '__main__':
+    setup_logging() # Call setup_logging here
+    sys.excepthook = handle_exception # Set the custom exception hook
+
+    logger.info("Application starting...")
+
+    app = QApplication(sys.argv)
+    main_window = MainWindow()
+    main_window.show()
+    # Example: Automatically load an article on startup for quick testing
+    # main_window.load_article("test_article_1")
+
+    # --- Playback Methods ---
+    def play_audio_segment(self, start_time_ms: int, end_time_ms: int):
+        if logger:
+            logger.info(f"play_audio_segment called: start_ms={start_time_ms}, end_ms={end_time_ms}")
+        else:
+            print(f"play_audio_segment called: start_ms={start_time_ms}, end_ms={end_time_ms}")
+
+        if not self.current_audio_path or not os.path.exists(self.current_audio_path):
+            msg = f"No valid audio path set or file does not exist: {self.current_audio_path}"
+            if logger:
+                logger.error(msg)
+            else:
+                print(f"ERROR: {msg}")
+            QMessageBox.warning(self, "Playback Error", "Audio file not available for playback.")
+            return
+
+        if self.player.state() == QMediaPlayer.PlayingState or self.player.state() == QMediaPlayer.PausedState:
+            self.player.stop() # This should ideally trigger hiding line via stateChanged or EndOfMedia if timer was running
+            self.playback_timer.stop() # Explicitly stop timer
+            self.playback_line.hide()  # Explicitly hide line
+            if logger:
+                logger.debug("Player stopped, timer stopped, and playback line hidden before new playback segment.")
+
+        self.target_start_ms = start_time_ms
+        self.target_end_ms = end_time_ms # Stored for timer logic later
+
+        url = QUrl.fromLocalFile(self.current_audio_path)
+        content = QMediaContent(url)
+
+        # Connect mediaStatusChanged only if not already connected
+        # A more robust way might be to disconnect first if already connected, then reconnect,
+        # or use a flag as done here.
+        if not self._media_status_connected:
+            self.player.mediaStatusChanged.connect(self.on_media_status_changed)
+            self._media_status_connected = True
+            if logger:
+                logger.debug("Connected mediaStatusChanged signal.")
+
+        if logger:
+            logger.debug(f"Setting media to: {url.toLocalFile()}")
+        self.player.setMedia(content)
+        # Position will be set in on_media_status_changed when media is loaded
+
+    def on_media_status_changed(self, status):
+        if logger:
+            logger.debug(f"Media status changed: {status}")
+        else:
+            print(f"Media status changed: {status}")
+
+        if status == QMediaPlayer.LoadedMedia:
+            if logger:
+                logger.info(f"Media loaded. Setting position to {self.target_start_ms} ms.")
+            self.player.setPosition(self.target_start_ms) # Set position first
+
+            # Prepare and show the playback line
+            self.playback_line.setValue(self.target_start_ms / 1000.0)
+            self.playback_line.show()
+
+            self.player.play() # Then play
+
+            self.playback_timer.start(50) # Start timer for line updates
+            if logger:
+                logger.info(f"Playback started from {self.target_start_ms} ms. Line shown, timer started. Will stop near {self.target_end_ms} ms.")
+
+        elif status == QMediaPlayer.EndOfMedia:
+            if logger:
+                logger.info("Reached QMediaPlayer.EndOfMedia. Stopping timer and hiding line.")
+            self.playback_timer.stop()
+            self.playback_line.hide()
+
+        elif status == QMediaPlayer.InvalidMedia:
+            err_msg = f"Invalid media: {self.player.errorString()}"
+            if logger:
+                logger.error(err_msg)
+            QMessageBox.critical(self, "Playback Error", f"Could not load the audio for playback: Invalid media. ({self.player.errorString()})")
+
+        elif status == QMediaPlayer.NoMedia:
+            # This can happen if setMedia(QMediaContent()) is called with an empty QMediaContent, or after stop() and setMedia(None)
+            # It's not necessarily an error if it's an intended state, but if we just tried to load valid media, it's an issue.
+            if self.player.source() and not self.player.source().isEmpty(): # Check if we were trying to load something
+                 err_msg = f"No media loaded, though a source was provided: {self.player.source().url().toLocalFile() if self.player.source() else 'None'}"
+                 if logger:
+                     logger.error(err_msg)
+                 QMessageBox.critical(self, "Playback Error", "Could not load the audio for playback: No media found.")
+
+    def keyPressEvent(self, event):
+        if event.key() == Qt.Key_Space:
+            player_state = self.player.state()
+            if logger:
+                logger.debug(f"Spacebar pressed. Player state: {player_state}")
+
+            if player_state == QMediaPlayer.PlayingState:
+                self.player.pause()
+                self.playback_timer.stop() # Stop line movement
+                if logger:
+                    logger.info("Playback paused via Spacebar. Playback line timer stopped.")
+            elif player_state == QMediaPlayer.PausedState:
+                self.player.play()
+                self.playback_timer.start(50) # Resume line movement
+                if logger:
+                    logger.info("Playback resumed via Spacebar. Playback line timer started.")
+            elif player_state == QMediaPlayer.StoppedState:
+                if logger:
+                    logger.info("Spacebar pressed while player is stopped. Attempting to play current sentence.")
+                current_item = self.sentence_list_widget.currentItem()
+                if current_item and self.current_audio_path:
+                    sentence_data = self.get_sentence_data(current_item)
+                    if sentence_data:
+                        start_ms = int(sentence_data.get('start_time', 0) * 1000)
+                        end_ms = int(sentence_data.get('end_time', 0) * 1000)
+                        if end_ms > start_ms:
+                            if logger:
+                                logger.info(f"Playing current sentence {sentence_data.get('sentence_id', 'N/A')} from {start_ms}ms to {end_ms}ms via Spacebar.")
+                            self.play_audio_segment(start_ms, end_ms)
+                        else:
+                            if logger:
+                                logger.warn(f"Current sentence {sentence_data.get('sentence_id', 'N/A')} has invalid start/end times ({start_ms}ms/{end_ms}ms) for playback via Spacebar.")
+                    else:
+                        if logger:
+                            logger.warn("No sentence data for current item to play via Spacebar.")
+                else:
+                    if logger:
+                        logger.info("No current sentence selected or audio path not available; doing nothing on Spacebar press while stopped.")
+            event.accept()
+        else:
+            super(MainWindow, self).keyPressEvent(event)
+
+    def update_playback_line_position(self):
+        if self.player.state() == QMediaPlayer.PlayingState:
+            current_pos_ms = self.player.position()
+            self.playback_line.setValue(current_pos_ms / 1000.0)
+
+            # Check if playback needs to stop based on target_end_ms
+            # Add a small buffer (e.g., 50-100ms) to target_end_ms because timer updates are not perfectly precise
+            # and player.position() might slightly exceed target_end_ms before this check runs.
+            # Also ensure target_end_ms is positive to avoid issues with uninitialized values.
+            if self.target_end_ms > 0 and current_pos_ms >= self.target_end_ms - 20: # 20ms buffer
+                if logger:
+                    logger.info(f"Playback reached or passed target end time {self.target_end_ms}ms (current: {current_pos_ms}ms). Stopping.")
+                self.player.stop() # This will trigger stateChanged, which should handle timer stop and line hide.
+                # Redundant safety, but can be useful:
+                self.playback_timer.stop()
+                self.playback_line.hide()
+        else:
+            # Player is not in PlayingState (e.g., paused or stopped)
+            self.playback_timer.stop() # Stop the timer
+            if self.player.state() == QMediaPlayer.StoppedState:
+                self.playback_line.hide() # Hide line if fully stopped
+            if logger:
+                logger.debug(f"Player not in PlayingState (current: {self.player.state()}) during playback timer update. Stopping timer. Line hidden if stopped.")
 
 
 if __name__ == '__main__':
