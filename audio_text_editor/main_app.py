@@ -1,4 +1,6 @@
 import sys
+import logging
+import logging.handlers
 from PyQt5.QtWidgets import (QApplication, QMainWindow, QWidget, QVBoxLayout, QHBoxLayout,
                              QListWidget, QPushButton, QInputDialog, QListWidgetItem, QTextEdit, QMessageBox,
                              QDialog, QDialogButtonBox) # Added QDialog, QDialogButtonBox
@@ -355,11 +357,17 @@ class MainWindow(QMainWindow):
             return
 
         audio_file_to_load = self.current_audio_path # Use the absolute path directly
+        if logger:
+            logger.info(f"Attempting to load audio from: {audio_file_to_load}")
+        else: # Fallback if logger somehow isn't initialized, though it should be.
+            print(f"Attempting to load audio from: {audio_file_to_load}")
 
         try:
-            print(f"Attempting to load audio from temporary file: {audio_file_to_load}")
             if not os.path.exists(audio_file_to_load): # Should exist if download was successful
-                print(f"Error: Temporary audio file not found at {audio_file_to_load}")
+                if logger:
+                    logger.error(f"Error: Temporary audio file not found at {audio_file_to_load}")
+                else:
+                    print(f"Error: Temporary audio file not found at {audio_file_to_load}")
                 self.waveform_plot.setLabel('left', 'Amplitude')
                 self.waveform_plot.setLabel('bottom', 'Time', units='s')
                 self.waveform_plot.plot([0],[0], pen=None, symbol='o')
@@ -369,15 +377,34 @@ class MainWindow(QMainWindow):
             self.current_waveform_y, self.current_waveform_sr = librosa.load(audio_file_to_load, sr=None, mono=True)
             time_axis = np.arange(0, len(self.current_waveform_y)) / self.current_waveform_sr
 
-            self.waveform_plot.plot(time_axis, self.current_waveform_y, pen='w')
+            plot_data_item = self.waveform_plot.plot(time_axis, self.current_waveform_y, pen='w')
+            if plot_data_item:
+                plot_data_item.setDownsampling(auto=True, method='peak')
+                if logger:
+                    logger.debug("Enabled auto-downsampling on waveform plot.")
+
             self.waveform_plot.setLabel('left', 'Amplitude')
             self.waveform_plot.setLabel('bottom', 'Time', units='s')
-            print(f"Successfully loaded waveform from {self.current_audio_path}")
+            if logger:
+                logger.info(f"Successfully loaded waveform. Shape: {self.current_waveform_y.shape}, SR: {self.current_waveform_sr}")
+            else:
+                print(f"Successfully loaded waveform from {self.current_audio_path}")
 
         except Exception as e: # Catch librosa.load errors or other issues
-            error_msg = f"Error loading audio from temporary file {self.current_audio_path}: {e}"
-            print(error_msg)
-            QMessageBox.critical(self, "Waveform Load Error", error_msg)
+            if logger:
+                logger.error(f"Error loading audio from {audio_file_to_load}: {e}", exc_info=True)
+            else:
+                error_msg = f"Error loading audio from temporary file {self.current_audio_path}: {e}" # Keep original error_msg for QMessageBox
+                print(error_msg)
+
+            self.current_waveform_y = None # Reset waveform data on error
+            self.current_waveform_sr = None # Reset waveform data on error
+
+            # Construct error_msg for QMessageBox if not already done (e.g. if logger was active)
+            # This ensures QMessageBox still gets a user-friendly message.
+            error_msg_for_box = f"Error loading audio from temporary file {os.path.basename(audio_file_to_load or 'Unknown File')}: {e}"
+            QMessageBox.critical(self, "Waveform Load Error", error_msg_for_box)
+
             self.waveform_plot.setLabel('left', 'Amplitude')
             self.waveform_plot.setLabel('bottom', 'Time', units='s')
             self.waveform_plot.plot([0],[0], pen=None, symbol='o')
@@ -404,6 +431,9 @@ class MainWindow(QMainWindow):
         if not current_sentence_data:
             self.sentence_editor_textedit.setText("") # Clear editor if no data
             return
+
+        if logger:
+            logger.info(f"Sentence selected: {current_sentence_data}")
 
         # Populate the sentence editor
         self.sentence_editor_textedit.setText(current_sentence_data.get('text', ''))
@@ -440,17 +470,40 @@ class MainWindow(QMainWindow):
         # Update waveform view
         plot_item = self.waveform_plot.getPlotItem()
         if plot_item: # Ensure plot_item is available
-             plot_item.setXRange(display_start_time - padding, display_end_time + padding, padding=0)
+            if logger:
+                logger.debug(f"Setting XRange: start={display_start_time - padding}, end={display_end_time + padding}, padding={padding}")
+            plot_item.setXRange(display_start_time - padding, display_end_time + padding, padding=0)
 
 
         # Add new markers for the current sentence's boundaries
         current_start = current_sentence_data['start_time']
         current_end = current_sentence_data['end_time']
 
+        # --- Time Value Validation ---
+        times_to_check = [display_start_time, display_end_time, current_start, current_end, padding]
+        valid_finite = all(np.isfinite(t) for t in times_to_check if t is not None) # padding can be 0
+        valid_order_display = display_start_time <= display_end_time
+        valid_order_current = current_start <= current_end
+
+        if not (valid_finite and valid_order_display and valid_order_current):
+            error_details = (
+                f"display_start={display_start_time}, display_end={display_end_time}, "
+                f"current_start={current_start}, current_end={current_end}, padding={padding}. "
+                f"Checks: finite={valid_finite}, display_order={valid_order_display}, current_order={valid_order_current}."
+            )
+            if logger:
+                logger.error(f"Invalid time values for waveform update: {error_details} Skipping pyqtgraph updates.")
+            else:
+                print(f"ERROR: Invalid time values for waveform update: {error_details} Skipping pyqtgraph updates.")
+            return
+        # --- End Time Value Validation ---
+
         # Start Line
         start_line_movable = current_idx > 0
         start_pen_color = 'y' if start_line_movable else 'g' # Yellow if movable, Green if fixed
         self.current_sentence_start_line = pg.InfiniteLine(pos=current_start, angle=90, movable=start_line_movable, pen=pg.mkPen(start_pen_color, width=2))
+        if logger:
+            logger.debug(f"Adding start line at {current_start}, movable={start_line_movable}, color='{start_pen_color}'")
         if start_line_movable and prev_item_widget: # prev_item_widget should exist if start_line_movable
             self.current_sentence_start_line.sigDragged.connect(self.on_start_delimiter_dragged)
             self.current_sentence_start_line.affected_items = (prev_item_widget, current_item)
@@ -460,6 +513,8 @@ class MainWindow(QMainWindow):
         end_line_movable = current_idx < self.sentence_list_widget.count() - 1
         end_pen_color = 'y' if end_line_movable else 'r' # Yellow if movable, Red if fixed
         self.current_sentence_end_line = pg.InfiniteLine(pos=current_end, angle=90, movable=end_line_movable, pen=pg.mkPen(end_pen_color, width=2))
+        if logger:
+            logger.debug(f"Adding end line at {current_end}, movable={end_line_movable}, color='{end_pen_color}'")
         if end_line_movable and next_item_widget: # next_item_widget should exist if end_line_movable
             self.current_sentence_end_line.sigDragged.connect(self.on_end_delimiter_dragged)
             self.current_sentence_end_line.affected_items = (current_item, next_item_widget)
@@ -467,7 +522,10 @@ class MainWindow(QMainWindow):
 
         self.waveform_plot.addItem(self.current_sentence_start_line)
         self.waveform_plot.addItem(self.current_sentence_end_line)
-        print(f"Updated waveform view for sentence {current_sentence_data['sentence_id']}: {current_start}-{current_end}")
+        if logger:
+            logger.info(f"Updated waveform view for sentence {current_sentence_data['sentence_id']}: start={current_start}, end={current_end}")
+        else:
+            print(f"Updated waveform view for sentence {current_sentence_data['sentence_id']}: {current_start}-{current_end}")
 
     def on_start_delimiter_dragged(self, line):
         new_time = round(line.value(), 3) # Round to e.g. milliseconds
@@ -747,6 +805,7 @@ class MainWindow(QMainWindow):
         # Error checking for key existence can be added later if needed.
         item.setData(Qt.UserRole, new_data)
 
+
         # Update the item's text if 'text' or 'order_id' is in new_data
         # (to reflect potential changes)
         current_text_parts = item.text().split(":", 1)
@@ -757,8 +816,52 @@ class MainWindow(QMainWindow):
 
         item.setText(f"{new_order_id}: {new_text_content}")
 
+# --- Logging Setup ---
+logger = None # Global logger instance
+
+def setup_logging():
+    global logger
+    logger = logging.getLogger("AudioEditorApp")
+    logger.setLevel(logging.DEBUG)
+
+    # Create a rotating file handler
+    log_file = "audio_editor.log"
+    # Max 1MB per file, keep 3 backup files
+    file_handler = logging.handlers.RotatingFileHandler(
+        log_file, maxBytes=1*1024*1024, backupCount=3
+    )
+    file_handler.setLevel(logging.DEBUG)
+
+    # Create a logging format
+    formatter = logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s')
+    file_handler.setFormatter(formatter)
+
+    # Add the handler to the logger
+    logger.addHandler(file_handler)
+
+    # Optional: Add a console handler for debugging, if not already handled by basicConfig
+    # console_handler = logging.StreamHandler()
+    # console_handler.setLevel(logging.INFO) # Or DEBUG
+    # console_handler.setFormatter(formatter)
+    # logger.addHandler(console_handler)
+
+def handle_exception(exc_type, exc_value, exc_traceback):
+    """
+    Handles uncaught exceptions by logging them.
+    """
+    if logger:
+        logger.error("Uncaught exception:", exc_info=(exc_type, exc_value, exc_traceback))
+    # It's important to also call the default excepthook to ensure Python's normal error output
+    # is still produced, especially for console applications.
+    sys.__excepthook__(exc_type, exc_value, exc_traceback)
+
 
 if __name__ == '__main__':
+    setup_logging() # Call setup_logging here
+    sys.excepthook = handle_exception # Set the custom exception hook
+
+    logger.info("Application starting...")
+
     app = QApplication(sys.argv)
     main_window = MainWindow()
     main_window.show()
