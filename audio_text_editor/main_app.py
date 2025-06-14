@@ -17,7 +17,7 @@ import requests # Added
 import tempfile # Added
 
 # Constants
-FLASK_BACKEND_URL = "https://localhost:5002" # MODIFIED to https
+FLASK_BACKEND_URL = "https://localhost:5002" # Reverted to HTTP for local testing; change back to HTTPS if your local server uses a self-signed cert
 
 # --- Article Selection Dialog ---
 class ArticleSelectionDialog(QDialog):
@@ -59,6 +59,7 @@ class ArticleSelectionDialog(QDialog):
         url = f"{FLASK_BACKEND_URL}/api/books_with_articles"
         QApplication.setOverrideCursor(Qt.WaitCursor)
         try:
+            # For local self-signed certs, verify=False is needed. For production, use a proper cert path.
             response = requests.get(url, timeout=10, verify=False)
             response.raise_for_status()
             self.books_data = response.json()
@@ -196,13 +197,9 @@ class MainWindow(QMainWindow):
         overall_layout.addLayout(panes_layout)
         central_widget.setLayout(overall_layout)
 
-        # Load a default article for testing if needed
-        # self.load_article("test_article_1")
-
     def handle_player_error(self, error):
-        # global logger # Access the global logger if needed and initialized
         if logger:
-           logger.error(f"MediaPlayer Error: {error} - {self.player.errorString()}", exc_info=False) # exc_info can be noisy for simple errors
+           logger.error(f"MediaPlayer Error: {error} - {self.player.errorString()}", exc_info=False)
         else:
             print(f"MediaPlayer Error: {error} - {self.player.errorString()}")
 
@@ -227,19 +224,19 @@ class MainWindow(QMainWindow):
             return
 
         if self.player.state() == QMediaPlayer.PlayingState or self.player.state() == QMediaPlayer.PausedState:
-            self.player.stop() # This should ideally trigger hiding line via stateChanged or EndOfMedia if timer was running
-            self.playback_timer.stop() # Explicitly stop timer
-            self.playback_line.hide()  # Explicitly hide line
+            self.player.stop()
+            self.playback_timer.stop()
+            self.playback_line.hide()
             if logger:
                 logger.debug("Player stopped, timer stopped, and playback line hidden before new playback segment.")
 
         self.target_start_ms = start_time_ms
-        self.target_end_ms = end_time_ms # Stored for timer logic later
+        self.target_end_ms = end_time_ms
 
         url = QUrl.fromLocalFile(self.current_audio_path)
         content = QMediaContent(url)
 
-        if not self._media_status_connected: # Connect only once
+        if not self._media_status_connected:
             self.player.mediaStatusChanged.connect(self.on_media_status_changed)
             self._media_status_connected = True
             if logger:
@@ -317,42 +314,31 @@ class MainWindow(QMainWindow):
             self.playback_line.show()
 
     def prompt_load_article(self):
-        # QApplication.setOverrideCursor(Qt.WaitCursor) # Set cursor before dialog potentially lengthy ops
-        # try:
         dialog = ArticleSelectionDialog(self)
         result = dialog.exec_()
 
         if result == QDialog.Accepted:
             selected_article_id = dialog.get_selected_article_id()
             if selected_article_id is not None:
-                # Wait cursor for load_article_from_backend is handled inside that method
                 self.load_article_from_backend(str(selected_article_id))
             else:
-                # This case should ideally be prevented by disabling OK if no article selected,
-                # but as a fallback:
                 QMessageBox.warning(self, "Selection Error", "No article was selected from the dialog.")
-        # else: User cancelled
-        # finally:
-        #     QApplication.restoreOverrideCursor()
-
 
     def load_article_from_backend(self, article_id_str: str):
-        # Wait cursor is set at the beginning of this method
         QApplication.setOverrideCursor(Qt.WaitCursor)
         try:
             article_id = int(article_id_str)
         except ValueError:
             QMessageBox.warning(self, "Invalid ID", f"Article ID must be an integer. You entered: '{article_id_str}'")
-            QApplication.restoreOverrideCursor() # Restore cursor on early exit
+            QApplication.restoreOverrideCursor()
             return
 
         api_url = f"{FLASK_BACKEND_URL}/api/article/{article_id}"
         print(f"Attempting to load article from: {api_url}")
-        # QApplication.setOverrideCursor(Qt.WaitCursor) # Show loading cursor - MOVED to start of func
 
         try:
-            response = requests.get(api_url, timeout=10, verify=False) # MODIFIED to add verify=False
-            response.raise_for_status() # Raises HTTPError for bad responses (4XX or 5XX)
+            response = requests.get(api_url, timeout=10, verify=False)
+            response.raise_for_status()
 
             if response.status_code == 200:
                 article_api_data = response.json()
@@ -362,18 +348,11 @@ class MainWindow(QMainWindow):
                 converted_mp3_url = article_api_data.get('converted_mp3_url')
 
                 if converted_mp3_url:
-                    # Ensure the URL for audio download is also HTTPS if it's from the same backend
-                    # Or, if it's an external URL, it might have its own scheme.
-                    # For now, assuming it's also from localhost and needs similar treatment.
-                    # If converted_mp3_url can be http, this might need adjustment or conditional verify=False.
-                    # However, url_for(_external=True) in Flask usually respects the request's scheme.
-                    # If the API endpoint itself is https, url_for should generate https URLs.
                     print(f"Attempting to download audio from: {converted_mp3_url}")
                     try:
-                        audio_response = requests.get(converted_mp3_url, stream=True, timeout=30, verify=False) # MODIFIED to add verify=False
+                        audio_response = requests.get(converted_mp3_url, stream=True, timeout=30, verify=False)
                         audio_response.raise_for_status()
 
-                        # Save to a temporary file
                         with tempfile.NamedTemporaryFile(delete=False, suffix='.mp3') as tmp_audio_file:
                             for chunk in audio_response.iter_content(chunk_size=8192):
                                 tmp_audio_file.write(chunk)
@@ -383,8 +362,7 @@ class MainWindow(QMainWindow):
                         error_msg = f"Error downloading audio file: {audio_req_ex}"
                         print(error_msg)
                         QMessageBox.warning(self, "Audio Download Error", error_msg)
-                        # Proceed with loading article data even if audio fails
-                    except Exception as audio_ex: # Catch any other exception during download/save
+                    except Exception as audio_ex:
                         error_msg = f"An unexpected error occurred while downloading audio: {audio_ex}"
                         print(error_msg)
                         QMessageBox.critical(self, "Audio Download Failed", error_msg)
@@ -394,12 +372,6 @@ class MainWindow(QMainWindow):
 
                 self.process_loaded_article_data(article_api_data, local_audio_path)
 
-            # response.raise_for_status() should handle this, but as a fallback:
-            # else:
-            #     error_msg = f"Failed to load article. Status: {response.status_code}, Response: {response.text}"
-            #     print(error_msg)
-            #     QMessageBox.warning(self, "Load Error", error_msg)
-
         except requests.exceptions.HTTPError as http_err:
             error_message = f"HTTP error occurred: {http_err} - {http_err.response.text if http_err.response else 'No response body'}"
             print(error_message)
@@ -407,55 +379,45 @@ class MainWindow(QMainWindow):
                  QMessageBox.warning(self, "Not Found", f"Article with ID '{article_id}' not found on the server.")
             else:
                  QMessageBox.critical(self, "API Error", error_message)
-        except requests.exceptions.RequestException as req_ex: # Covers connection errors, timeouts, etc.
+        except requests.exceptions.RequestException as req_ex:
             error_msg = f"Failed to connect to backend or network error: {req_ex}"
             print(error_msg)
             QMessageBox.critical(self, "Connection Error", error_msg)
-        except Exception as e: # Catch any other unexpected errors
+        except Exception as e:
             error_msg = f"An unexpected error occurred: {e}"
             print(error_msg)
             QMessageBox.critical(self, "Unexpected Error", error_msg)
         finally:
-            QApplication.restoreOverrideCursor() # Reset cursor - THIS IS IMPORTANT HERE
+            QApplication.restoreOverrideCursor()
 
     def process_loaded_article_data(self, article_api_data: dict, local_audio_path: str | None):
         """
         Processes the fetched article data and populates the UI.
-        This method replaces the old load_article method's logic after data retrieval.
         """
         self.current_article_id = article_api_data.get('id')
-        self.current_title = article_api_data.get('filename', f"Article {self.current_article_id}") # Fallback title
-        self.current_audio_path = local_audio_path # This is now an absolute path to a temp file or None
+        self.current_title = article_api_data.get('filename', f"Article {self.current_article_id}")
+        self.current_audio_path = local_audio_path
 
         self.setWindowTitle(f"Audio-Text Editor - {self.current_title}")
         self.sentence_list_widget.clear()
-        self.sentence_editor_textedit.clear() # Clear editor as well
+        self.sentence_editor_textedit.clear()
 
         api_sentences = article_api_data.get('sentences', [])
         if not api_sentences:
             QMessageBox.information(self, "No Sentences", f"Article '{self.current_title}' loaded, but it contains no sentences.")
 
-        # Sort sentences by paragraph_index, then sentence_index_in_paragraph (if available from API)
-        # For now, we assume sentences from API are already in correct order or use a simple counter.
-        # If API provides paragraph_index and sentence_index_in_paragraph, use them:
-        # sorted_sentences = sorted(api_sentences, key=lambda s: (s.get('paragraph_index', 0), s.get('sentence_index_in_paragraph', 0)))
-        # For now, let's just use the order they come in and generate order_id.
-
         for idx, sentence_api_data in enumerate(api_sentences):
-            order_id = idx + 1 # Generate order_id sequentially
+            order_id = idx + 1
 
-            # Map API fields to internal data structure
             start_time_ms = sentence_api_data.get('start_time_ms')
             end_time_ms = sentence_api_data.get('end_time_ms')
 
             sentence_data_internal = {
-                'sentence_id': sentence_api_data.get('id'), # Use DB sentence ID
-                'text': sentence_api_data.get('english_text', ''), # Use english_text
+                'sentence_id': sentence_api_data.get('id'),
+                'text': sentence_api_data.get('english_text', ''),
                 'start_time': start_time_ms / 1000.0 if start_time_ms is not None else 0.0,
                 'end_time': end_time_ms / 1000.0 if end_time_ms is not None else 0.0,
                 'order_id': order_id
-                # Add other fields from sentence_api_data if needed by the editor later
-                # e.g. 'chinese_text', 'audio_part_index' etc.
             }
 
             item_text = f"{sentence_data_internal['order_id']}: {sentence_data_internal['text']}"
@@ -475,31 +437,30 @@ class MainWindow(QMainWindow):
             first_item = self.sentence_list_widget.item(0)
             if first_item:
                  self.sentence_list_widget.setCurrentItem(first_item)
-        else: # No sentences, so ensure waveform markers are cleared
+        else:
             self.on_sentence_selection_changed(None, None)
 
 
     def load_waveform(self):
-        # Clear previous waveform data
         self.current_waveform_y = None
         self.current_waveform_sr = None
-        self.waveform_plot.clear() # Clear the plot widget itself
+        self.waveform_plot.clear()
 
-        if not self.current_audio_path: # This is now an absolute path or None
+        if not self.current_audio_path:
             print("No audio path available to load waveform.")
             self.waveform_plot.setLabel('left', 'Amplitude')
             self.waveform_plot.setLabel('bottom', 'Time', units='s')
-            self.waveform_plot.plot([0], [0], pen=None, symbol='o') # Plot a single point
+            self.waveform_plot.plot([0], [0], pen=None, symbol='o')
             return
 
-        audio_file_to_load = self.current_audio_path # Use the absolute path directly
+        audio_file_to_load = self.current_audio_path
         if logger:
             logger.info(f"Attempting to load audio from: {audio_file_to_load}")
-        else: # Fallback if logger somehow isn't initialized, though it should be.
+        else:
             print(f"Attempting to load audio from: {audio_file_to_load}")
 
         try:
-            if not os.path.exists(audio_file_to_load): # Should exist if download was successful
+            if not os.path.exists(audio_file_to_load):
                 if logger:
                     logger.error(f"Error: Temporary audio file not found at {audio_file_to_load}")
                 else:
@@ -507,7 +468,6 @@ class MainWindow(QMainWindow):
                 self.waveform_plot.setLabel('left', 'Amplitude')
                 self.waveform_plot.setLabel('bottom', 'Time', units='s')
                 self.waveform_plot.plot([0],[0], pen=None, symbol='o')
-                # Optionally, inform user via QMessageBox, but console log might be enough for this error
                 return
 
             self.current_waveform_y, self.current_waveform_sr = librosa.load(audio_file_to_load, sr=None, mono=True)
@@ -526,31 +486,24 @@ class MainWindow(QMainWindow):
             else:
                 print(f"Successfully loaded waveform from {self.current_audio_path}")
 
-        except Exception as e: # Catch librosa.load errors or other issues
+        except Exception as e:
             if logger:
                 logger.error(f"Error loading audio from {audio_file_to_load}: {e}", exc_info=True)
             else:
-                error_msg = f"Error loading audio from temporary file {self.current_audio_path}: {e}" # Keep original error_msg for QMessageBox
+                error_msg = f"Error loading audio from temporary file {self.current_audio_path}: {e}"
                 print(error_msg)
 
-            self.current_waveform_y = None # Reset waveform data on error
-            self.current_waveform_sr = None # Reset waveform data on error
+            self.current_waveform_y = None
+            self.current_waveform_sr = None
 
-            # Construct error_msg for QMessageBox if not already done (e.g. if logger was active)
-            # This ensures QMessageBox still gets a user-friendly message.
             error_msg_for_box = f"Error loading audio from temporary file {os.path.basename(audio_file_to_load or 'Unknown File')}: {e}"
             QMessageBox.critical(self, "Waveform Load Error", error_msg_for_box)
 
             self.waveform_plot.setLabel('left', 'Amplitude')
             self.waveform_plot.setLabel('bottom', 'Time', units='s')
             self.waveform_plot.plot([0],[0], pen=None, symbol='o')
-        # No finally block to delete temp file here, as it might be needed for playback later
-        # It should be cleaned up when a new article is loaded or app closes.
-        # However, self.current_audio_path stores this path, so we'd need a list of temp files to clean up.
-        # For simplicity now, let OS handle temp file deletion on reboot, or implement explicit cleanup later.
 
     def on_sentence_selection_changed(self, current_item: QListWidgetItem, previous_item: QListWidgetItem):
-        # Remove previous markers first, regardless of current_item
         if self.current_sentence_start_line:
             self.waveform_plot.removeItem(self.current_sentence_start_line)
             self.current_sentence_start_line = None
@@ -558,20 +511,18 @@ class MainWindow(QMainWindow):
             self.waveform_plot.removeItem(self.current_sentence_end_line)
             self.current_sentence_end_line = None
 
-        if not current_item or self.current_waveform_y is None: # Corrected condition
-            self.sentence_editor_textedit.setText("") # Clear editor if no item or no waveform
-            # Potentially reset zoom to full view if desired, or leave as is.
+        if not current_item or self.current_waveform_y is None:
+            self.sentence_editor_textedit.setText("")
             return
 
         current_sentence_data = self.get_sentence_data(current_item)
         if not current_sentence_data:
-            self.sentence_editor_textedit.setText("") # Clear editor if no data
+            self.sentence_editor_textedit.setText("")
             return
 
         if logger:
             logger.info(f"Sentence selected: {current_sentence_data}")
 
-        # Populate the sentence editor
         self.sentence_editor_textedit.setText(current_sentence_data.get('text', ''))
 
         current_idx = self.sentence_list_widget.row(current_item)
@@ -588,7 +539,6 @@ class MainWindow(QMainWindow):
             if next_item_widget:
                 next_sentence_data = self.get_sentence_data(next_item_widget)
 
-        # Calculate display range
         display_start_time = current_sentence_data['start_time']
         if prev_sentence_data:
             display_start_time = prev_sentence_data['start_time']
@@ -597,27 +547,24 @@ class MainWindow(QMainWindow):
         if next_sentence_data:
             display_end_time = next_sentence_data['end_time']
 
-        padding_ratio = 0.10 # 10% padding
+        padding_ratio = 0.10
         duration = display_end_time - display_start_time
         padding = duration * padding_ratio
-        if duration == 0: # Avoid zero padding if start and end are same (e.g. single sentence context)
-             padding = 0.5 # Default fixed padding
+        if duration == 0:
+             padding = 0.5
 
-        # Update waveform view
         plot_item = self.waveform_plot.getPlotItem()
-        if plot_item: # Ensure plot_item is available
+        if plot_item:
             if logger:
                 logger.debug(f"Setting XRange: start={display_start_time - padding}, end={display_end_time + padding}, padding={padding}")
             plot_item.setXRange(display_start_time - padding, display_end_time + padding, padding=0)
 
 
-        # Add new markers for the current sentence's boundaries
         current_start = current_sentence_data['start_time']
         current_end = current_sentence_data['end_time']
 
-        # --- Time Value Validation ---
         times_to_check = [display_start_time, display_end_time, current_start, current_end, padding]
-        valid_finite = all(np.isfinite(t) for t in times_to_check if t is not None) # padding can be 0
+        valid_finite = all(np.isfinite(t) for t in times_to_check if t is not None)
         valid_order_display = display_start_time <= display_end_time
         valid_order_current = current_start <= current_end
 
@@ -632,29 +579,26 @@ class MainWindow(QMainWindow):
             else:
                 print(f"ERROR: Invalid time values for waveform update: {error_details} Skipping pyqtgraph updates.")
             return
-        # --- End Time Value Validation ---
 
-        # Start Line
         start_line_movable = current_idx > 0
-        start_pen_color = 'y' if start_line_movable else 'g' # Yellow if movable, Green if fixed
+        start_pen_color = 'y' if start_line_movable else 'g'
         self.current_sentence_start_line = pg.InfiniteLine(pos=current_start, angle=90, movable=start_line_movable, pen=pg.mkPen(start_pen_color, width=2))
         if logger:
             logger.debug(f"Adding start line at {current_start}, movable={start_line_movable}, color='{start_pen_color}'")
-        if start_line_movable and prev_item_widget: # prev_item_widget should exist if start_line_movable
+        if start_line_movable and prev_item_widget:
             self.current_sentence_start_line.sigDragged.connect(self.on_start_delimiter_dragged)
             self.current_sentence_start_line.affected_items = (prev_item_widget, current_item)
-            self.current_sentence_start_line.original_pos = current_start # Store original position for validation reset
+            self.current_sentence_start_line.original_pos = current_start
 
-        # End Line
         end_line_movable = current_idx < self.sentence_list_widget.count() - 1
-        end_pen_color = 'y' if end_line_movable else 'r' # Yellow if movable, Red if fixed
+        end_pen_color = 'y' if end_line_movable else 'r'
         self.current_sentence_end_line = pg.InfiniteLine(pos=current_end, angle=90, movable=end_line_movable, pen=pg.mkPen(end_pen_color, width=2))
         if logger:
             logger.debug(f"Adding end line at {current_end}, movable={end_line_movable}, color='{end_pen_color}'")
-        if end_line_movable and next_item_widget: # next_item_widget should exist if end_line_movable
+        if end_line_movable and next_item_widget:
             self.current_sentence_end_line.sigDragged.connect(self.on_end_delimiter_dragged)
             self.current_sentence_end_line.affected_items = (current_item, next_item_widget)
-            self.current_sentence_end_line.original_pos = current_end # Store original position
+            self.current_sentence_end_line.original_pos = current_end
 
         self.waveform_plot.addItem(self.current_sentence_start_line)
         self.waveform_plot.addItem(self.current_sentence_end_line)
@@ -664,7 +608,7 @@ class MainWindow(QMainWindow):
             print(f"Updated waveform view for sentence {current_sentence_data['sentence_id']}: {current_start}-{current_end}")
 
     def on_start_delimiter_dragged(self, line):
-        new_time = round(line.value(), 3) # Round to e.g. milliseconds
+        new_time = round(line.value(), 3)
 
         if not hasattr(line, 'affected_items') or not line.affected_items:
             print("Error: Start line affected_items not set.")
@@ -679,17 +623,10 @@ class MainWindow(QMainWindow):
             if hasattr(line, 'original_pos'): line.setValue(line.original_pos)
             return
 
-        # Validation
-        min_time = prev_data['start_time']
-        max_time = curr_data['end_time']
-
-        # A small buffer to prevent zero-duration sentences, e.g., 10ms
         buffer = 0.010
 
-        # new_time must be > prev_data.start_time + buffer AND < curr_data.end_time - buffer
         if not (prev_data['start_time'] + buffer <= new_time <= curr_data['end_time'] - buffer):
             print(f"Invalid start delimiter position: {new_time}. Must be between {prev_data['start_time'] + buffer} and {curr_data['end_time'] - buffer}.")
-            # Reset to original position of the current sentence's start time
             line.setValue(curr_data['start_time'])
             return
 
@@ -701,7 +638,7 @@ class MainWindow(QMainWindow):
 
         self.update_sentence_data(item_prev, prev_data_copy)
         self.update_sentence_data(item_curr, curr_data_copy)
-        line.original_pos = new_time # Update original_pos after successful drag
+        line.original_pos = new_time
         print(f"Start delimiter dragged. Prev_end: {new_time}, Curr_start: {new_time}")
 
     def on_end_delimiter_dragged(self, line):
@@ -720,16 +657,10 @@ class MainWindow(QMainWindow):
             if hasattr(line, 'original_pos'): line.setValue(line.original_pos)
             return
 
-        # Validation
-        min_time = curr_data['start_time']
-        max_time = next_data['end_time']
+        buffer = 0.010
 
-        buffer = 0.010 # 10ms buffer
-
-        # new_time must be > curr_data.start_time + buffer AND < next_data.end_time - buffer
         if not (curr_data['start_time'] + buffer <= new_time <= next_data['end_time'] - buffer):
             print(f"Invalid end delimiter position: {new_time}. Must be between {curr_data['start_time'] + buffer} and {next_data['end_time'] - buffer}.")
-            # Reset to original position of the current sentence's end time
             line.setValue(curr_data['end_time'])
             return
 
@@ -741,14 +672,13 @@ class MainWindow(QMainWindow):
 
         self.update_sentence_data(item_curr, curr_data_copy)
         self.update_sentence_data(item_next, next_data_copy)
-        line.original_pos = new_time # Update original_pos after successful drag
+        line.original_pos = new_time
         print(f"End delimiter dragged. Curr_end: {new_time}, Next_start: {new_time}")
 
     def update_current_sentence_text(self):
         current_item = self.sentence_list_widget.currentItem()
         if not current_item:
             print("No sentence selected to update.")
-            # Optionally: show a status bar message
             return
 
         current_sentence_data = self.get_sentence_data(current_item)
@@ -759,10 +689,8 @@ class MainWindow(QMainWindow):
         new_text = self.sentence_editor_textedit.toPlainText().strip()
         if not new_text:
             print("Cannot update with empty text.")
-            # Optionally: show a warning dialog or status message
             return
 
-        # Check if text actually changed to avoid unnecessary updates
         if new_text == current_sentence_data.get('text'):
             print("Text unchanged, no update performed.")
             return
@@ -774,14 +702,6 @@ class MainWindow(QMainWindow):
         print(f"Updated sentence {updated_data['sentence_id']} with new text: '{new_text}'")
 
     def on_waveform_mouse_clicked(self, mouse_event):
-        # Check if the click was within the plot area and get the time
-        # mouse_event is a pyqtgraph.GraphicsScene.MouseClickEvent
-        # It has pos() (QPointF in item coords) and scenePos() (QPointF in scene coords)
-        # For mapSceneToView, we need scenePos.
-        # We also only care about left clicks, pyqtgraph's sigMouseClicked usually only fires for left clicks.
-        # If it can fire for other buttons, mouse_event.button() might be available.
-        # For now, assume left click is implied by sigMouseClicked.
-
         plot_item = self.waveform_plot.getPlotItem()
         if not plot_item.sceneBoundingRect().contains(mouse_event.scenePos()):
             return
@@ -789,24 +709,22 @@ class MainWindow(QMainWindow):
         view_coords = plot_item.getViewBox().mapSceneToView(mouse_event.scenePos())
         click_time = round(view_coords.x(), 3)
 
-        if click_time < 0: # Clicked before the start of the audio
+        if click_time < 0:
             return
         if self.current_waveform_y is not None and self.current_waveform_sr is not None:
             max_time = len(self.current_waveform_y) / self.current_waveform_sr
-            if click_time > max_time: # Clicked after the end of the audio
+            if click_time > max_time:
                 return
-        else: # No waveform loaded
+        else:
             return
 
         modifiers = QtWidgets.QApplication.keyboardModifiers()
 
         if modifiers & Qt.ControlModifier:
-            # --- Ctrl-Click: Split Sentence Logic ---
             if logger:
                 logger.debug(f"Ctrl-Click detected at {click_time}s for splitting.")
             self.handle_split_action(click_time)
         else:
-            # --- Simple Click: Playback Logic ---
             if logger:
                 logger.info(f"Simple click detected at {click_time}s for playback.")
 
@@ -832,8 +750,6 @@ class MainWindow(QMainWindow):
 
     def handle_split_action(self, click_time: float):
         """Handles the logic for splitting a sentence at the given click_time."""
-        # This method encapsulates the previous Ctrl-Click logic.
-        # Identify the sentence under the click (this part is duplicated from the original on_waveform_ctrl_clicked)
         original_item = None
         original_sentence_data = None
         original_idx = -1
@@ -854,8 +770,7 @@ class MainWindow(QMainWindow):
                 print(f"Ctrl+Click at {click_time}s did not fall within any sentence.")
             return
 
-        # Validation: Ensure click_time is not too close to existing boundaries
-        buffer = 0.050 # 50ms buffer, can be adjusted
+        buffer = 0.050
         if not (original_sentence_data['start_time'] + buffer < click_time < original_sentence_data['end_time'] - buffer):
             if logger:
                 logger.warn(f"Split time {click_time:.3f}s is too close to sentence boundaries of sentence {original_sentence_data['sentence_id']} or would create a very short sentence. Min allowed: {original_sentence_data['start_time'] + buffer}, Max allowed: {original_sentence_data['end_time'] - buffer}")
@@ -868,41 +783,29 @@ class MainWindow(QMainWindow):
         else:
             print(f"Ctrl+Click detected at {click_time}s within sentence {original_sentence_data['sentence_id']}.")
 
-        # 1. Update original sentence
         updated_original_data = original_sentence_data.copy()
         updated_original_data['end_time'] = click_time
-        # Text is not truncated automatically here. User has to edit manually.
         self.update_sentence_data(original_item, updated_original_data)
 
-        # 2. Prepare new sentence data
-        new_sentence_text = "" # New sentence starts empty
-        new_sentence_id = f"sent_{int(time.time()*1000)}_{np.random.randint(1000, 9999)}" # More unique ID
+        new_sentence_text = ""
+        new_sentence_id = f"sent_{int(time.time()*1000)}_{np.random.randint(1000, 9999)}"
 
         new_sentence_data_dict = {
             'sentence_id': new_sentence_id,
             'text': new_sentence_text,
-            'start_time': click_time, # Starts where original ended
-            'end_time': original_sentence_data['end_time'], # Takes original's old end time
-            'order_id': -1 # Placeholder, will be fixed by update_order_ids
+            'start_time': click_time,
+            'end_time': original_sentence_data['end_time'],
+            'order_id': -1
         }
 
-        # 3. Create and insert new QListWidgetItem for the new sentence
-        new_item = QListWidgetItem() # Text will be set by update_sentence_data
+        new_item = QListWidgetItem()
         self.sentence_list_widget.insertItem(original_idx + 1, new_item)
-        # Now set its data and text (update_sentence_data does both)
-        # Temporarily assign order_id before full re-order for display consistency
         new_sentence_data_dict['order_id'] = original_sentence_data['order_id'] +1
         self.update_sentence_data(new_item, new_sentence_data_dict)
 
-
-        # 4. Re-order all subsequent sentences (update order_id)
         self.update_order_ids()
-
-        # 5. Select the newly created item to trigger UI updates (waveform zoom, markers)
         self.sentence_list_widget.setCurrentItem(new_item)
         print(f"Sentence {original_sentence_data['sentence_id']} split. New sentence {new_sentence_id} created.")
-        # TODO: Need to handle cleanup of old self.current_audio_path if a new one is loaded.
-        # A list of temp files could be maintained, and cleaned on app exit or new load.
 
     def update_order_ids(self):
         """
@@ -914,51 +817,23 @@ class MainWindow(QMainWindow):
             if item:
                 data = self.get_sentence_data(item)
                 if data:
-                    if data.get('order_id') != (i + 1): # Only update if necessary
+                    if data.get('order_id') != (i + 1):
                         data_copy = data.copy()
                         data_copy['order_id'] = i + 1
                         self.update_sentence_data(item, data_copy)
         print("Order IDs updated.")
 
     def save_article(self):
-        # Saving is disabled when fetching from backend for now.
         QMessageBox.information(self, "Save Disabled", "Saving changes back to the server is not implemented in this version.")
         print("Save action called, but saving is currently disabled/not implemented for backend integration.")
-        # if not self.current_article_id:
-        #     QMessageBox.warning(self, "Warning", "No article loaded to save.")
-        #     return
-        #
-        # all_sentences = self.get_all_sentences_data()
-        # if not all_sentences: # Or check if any changes were made
-        #     QMessageBox.information(self, "Info", "No sentences to save or no changes made.")
-        #     # return # Allow saving even if empty, to effectively clear sentences if desired.
-        #
-        # print(f"Attempting to save article: {self.current_article_id} with {len(all_sentences)} sentences.")
-        #
-        # # Ensure db_mock.save_article_data is imported
-        # success, message = save_article_data(self.current_article_id, all_sentences)
-        #
-        # if success:
-        #     QMessageBox.information(self, "Success", f"Article '{self.current_article_id}' saved successfully: {message}")
-        #     print(f"Save successful: {message}")
-        # else:
-        #     QMessageBox.critical(self, "Error", f"Failed to save article '{self.current_article_id}': {message}")
-        #     print(f"Save failed: {message}")
 
     # Helper methods for sentence data management
     def get_sentence_data(self, item: QListWidgetItem) -> dict | None:
-        """
-        Retrieves the data dictionary stored in a QListWidgetItem.
-        Returns None if no data is found or item is invalid.
-        """
         if item:
             return item.data(Qt.UserRole)
         return None
 
     def get_all_sentences_data(self) -> list[dict]:
-        """
-        Retrieves data dictionaries for all sentences in the QListWidget.
-        """
         all_sentences = []
         for i in range(self.sentence_list_widget.count()):
             item = self.sentence_list_widget.item(i)
@@ -969,20 +844,11 @@ class MainWindow(QMainWindow):
         return all_sentences
 
     def update_sentence_data(self, item: QListWidgetItem, new_data: dict):
-        """
-        Updates the data and text of a QListWidgetItem.
-        """
         if not item:
             return
 
-        # Ensure all necessary keys are present in new_data before updating
-        # For this subtask, we assume new_data is valid.
-        # Error checking for key existence can be added later if needed.
         item.setData(Qt.UserRole, new_data)
 
-
-        # Update the item's text if 'text' or 'order_id' is in new_data
-        # (to reflect potential changes)
         current_text_parts = item.text().split(":", 1)
         current_order_id_str = current_text_parts[0]
 
@@ -992,33 +858,21 @@ class MainWindow(QMainWindow):
         item.setText(f"{new_order_id}: {new_text_content}")
 
 # --- Logging Setup ---
-logger = None # Global logger instance
+logger = None
 
 def setup_logging():
     global logger
     logger = logging.getLogger("AudioEditorApp")
     logger.setLevel(logging.DEBUG)
 
-    # Create a rotating file handler
     log_file = "audio_editor.log"
-    # Max 1MB per file, keep 3 backup files
     file_handler = logging.handlers.RotatingFileHandler(
         log_file, maxBytes=1*1024*1024, backupCount=3
     )
     file_handler.setLevel(logging.DEBUG)
-
-    # Create a logging format
     formatter = logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s')
     file_handler.setFormatter(formatter)
-
-    # Add the handler to the logger
     logger.addHandler(file_handler)
-
-    # Optional: Add a console handler for debugging, if not already handled by basicConfig
-    # console_handler = logging.StreamHandler()
-    # console_handler.setLevel(logging.INFO) # Or DEBUG
-    # console_handler.setFormatter(formatter)
-    # logger.addHandler(console_handler)
 
 def handle_exception(exc_type, exc_value, exc_traceback):
     """
@@ -1026,37 +880,16 @@ def handle_exception(exc_type, exc_value, exc_traceback):
     """
     if logger:
         logger.error("Uncaught exception:", exc_info=(exc_type, exc_value, exc_traceback))
-    # It's important to also call the default excepthook to ensure Python's normal error output
-    # is still produced, especially for console applications.
     sys.__excepthook__(exc_type, exc_value, exc_traceback)
 
 
 if __name__ == '__main__':
-    setup_logging() # Call setup_logging here
-    sys.excepthook = handle_exception # Set the custom exception hook
+    setup_logging()
+    sys.excepthook = handle_exception
 
     logger.info("Application starting...")
 
     app = QApplication(sys.argv)
     main_window = MainWindow()
     main_window.show()
-    # Example: Automatically load an article on startup for quick testing
-    # main_window.load_article("test_article_1")
-
-# The play_audio_segment and on_media_status_changed methods that were
-# incorrectly placed at the module level after if __name__ == '__main__'
-# are also being removed from this location. They will be re-inserted
-# into the MainWindow class in the next step.
-
-if __name__ == '__main__':
-    setup_logging() # Call setup_logging here
-    sys.excepthook = handle_exception # Set the custom exception hook
-
-    logger.info("Application starting...")
-
-    app = QApplication(sys.argv)
-    main_window = MainWindow()
-    main_window.show()
-    # Example: Automatically load an article on startup for quick testing
-    # main_window.load_article("test_article_1")
     sys.exit(app.exec_())
