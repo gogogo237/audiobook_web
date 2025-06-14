@@ -296,6 +296,10 @@ document.addEventListener('DOMContentLoaded', function() {
         let menuHTML = `<div class="contextual-menu-item" data-action="show-translation" title="Show Chinese Translation"><span class="menu-icon">💬</span><span class="menu-text">Translate</span></div>`;
         menuHTML += `<div class="contextual-menu-item" data-action="save-location" title="Save this reading location"><span class="menu-icon">💾</span><span class="menu-text">Save Spot</span></div>`;
 
+        if (isAudiobookModeFull && audioBuffer) {
+            menuHTML += `<div class="contextual-menu-item" data-action="edit-audio-clip" title="Display audio waveform for this sentence"><span class="menu-icon">✏️</span><span class="menu-text">Edit Clip</span></div>`;
+        }
+
         const canPlayAudio = (isAudiobookModeFull && audioContext && audioBuffer && HAS_TIMESTAMPS) ||
                              (isAudiobookModeParts && audioContext && audioBuffer && HAS_TIMESTAMPS && currentLoadedAudioPartIndex !== -1 &&
                               sentenceElement.dataset.audioPartIndex !== undefined && parseInt(sentenceElement.dataset.audioPartIndex, 10) === currentLoadedAudioPartIndex);
@@ -428,6 +432,129 @@ document.addEventListener('DOMContentLoaded', function() {
         }
         return hexString;
     }
+
+function clearExistingWaveform(sentenceElement) {
+    if (!sentenceElement) return;
+    const nextElement = sentenceElement.nextElementSibling;
+    if (nextElement && nextElement.classList.contains('waveform-canvas')) {
+        nextElement.remove();
+    }
+}
+
+function displayWaveform(sentenceElement, audioBuffer, startTimeMs, endTimeMs) {
+    if (!sentenceElement || !audioBuffer || typeof startTimeMs === 'undefined' || typeof endTimeMs === 'undefined') {
+        console.warn("displayWaveform: Missing required parameters.");
+        return;
+    }
+    if (!audioContext) { // Ensure audioContext is available
+        console.warn("displayWaveform: AudioContext not available.");
+        return;
+    }
+
+    clearExistingWaveform(sentenceElement);
+
+    const canvas = document.createElement('canvas');
+    canvas.className = 'waveform-canvas';
+    canvas.height = 75; // Fixed height for the waveform
+
+    // Set canvas width based on its parent paragraph, ensuring it's visible
+    if (sentenceElement.parentElement) {
+        canvas.style.width = '100%'; // Make canvas responsive within its container
+        canvas.width = sentenceElement.parentElement.offsetWidth; // Actual drawing surface width
+    } else {
+        canvas.style.width = '100%'; // Default fallback
+        canvas.width = 300; // Default drawing surface width if parent is not found
+        console.warn("displayWaveform: sentenceElement.parentElement is null. Using default canvas width.");
+    }
+     // Ensure canvas has a positive width, otherwise drawing makes no sense.
+    if (canvas.width <= 0) {
+        console.warn("displayWaveform: Calculated canvas width is 0 or negative. Aborting waveform display.");
+        // Optionally, try to set a minimum width or log more details.
+        // For now, just return to avoid errors.
+        return;
+    }
+
+
+    // Insert the canvas into the DOM after the sentenceElement
+    // This might need adjustment if it causes layout issues, e.g., inserting after parent <p>
+    sentenceElement.insertAdjacentElement('afterend', canvas);
+
+    const ctx = canvas.getContext('2d');
+    if (!ctx) {
+        console.error("displayWaveform: Failed to get 2D rendering context.");
+        return;
+    }
+
+    // Extract Audio Data
+    const startSample = Math.floor((startTimeMs / 1000) * audioBuffer.sampleRate);
+    let endSample = Math.floor((endTimeMs / 1000) * audioBuffer.sampleRate);
+
+    // Ensure endSample does not exceed audioBuffer.length
+    if (endSample > audioBuffer.length) {
+        endSample = audioBuffer.length;
+    }
+    // Ensure startSample is not greater than or equal to endSample
+    if (startSample >= endSample) {
+        console.warn("displayWaveform: startSample is greater than or equal to endSample. Nothing to display.");
+        // Optionally draw a flat line or some indicator
+        ctx.fillStyle = '#f0f0f0';
+        ctx.fillRect(0, 0, canvas.width, canvas.height);
+        ctx.strokeStyle = 'rgb(0, 123, 255)';
+        ctx.beginPath();
+        ctx.moveTo(0, canvas.height / 2);
+        ctx.lineTo(canvas.width, canvas.height / 2);
+        ctx.stroke();
+        return;
+    }
+
+
+    const channelData = audioBuffer.getChannelData(0); // Assuming mono or taking the first channel
+    const segmentData = channelData.slice(startSample, endSample);
+
+    if (segmentData.length === 0) {
+        console.warn("displayWaveform: segmentData is empty. Nothing to draw.");
+         // Optionally draw a flat line or some indicator
+        ctx.fillStyle = '#f0f0f0';
+        ctx.fillRect(0, 0, canvas.width, canvas.height);
+        ctx.strokeStyle = 'rgb(0, 123, 255)';
+        ctx.beginPath();
+        ctx.moveTo(0, canvas.height / 2);
+        ctx.lineTo(canvas.width, canvas.height / 2);
+        ctx.stroke();
+        return;
+    }
+
+    // Draw the Waveform
+    ctx.fillStyle = '#f0f0f0'; // Background color for the canvas
+    ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+    ctx.lineWidth = 1;
+    ctx.strokeStyle = 'rgb(0, 123, 255)'; // Waveform line color
+    ctx.beginPath();
+
+    const sliceWidth = canvas.width * 1.0 / segmentData.length;
+    let x = 0;
+
+    for (let i = 0; i < segmentData.length; i++) {
+        const v = segmentData[i] / 2; // Normalize and scale (adjust divisor for more/less amplitude)
+        const y = (v * canvas.height) + (canvas.height / 2); // y position (scaling v by full height now)
+
+        if (i === 0) {
+            ctx.moveTo(x, y);
+        } else {
+            ctx.lineTo(x, y);
+        }
+        x += sliceWidth;
+    }
+
+    // Ensure the line goes to the end of the canvas width
+    if (segmentData.length > 0) {
+         ctx.lineTo(canvas.width, (segmentData[segmentData.length -1]/2 * canvas.height) + (canvas.height/2) );
+    } else {
+        ctx.lineTo(canvas.width, canvas.height / 2); // Draw to middle if no data
+    }
+    ctx.stroke();
+}
 
     // --- Audio Parts View UI ---
     let isPartsViewActive = false;
@@ -682,6 +809,30 @@ document.addEventListener('DOMContentLoaded', function() {
                             if (actionTarget) actionTarget.title = "Stop Sentence Audio";
                         }
                     } else { alert("Audio not ready or sentence part mismatch."); }
+                    break;
+                case 'edit-audio-clip':
+                    if (!highlightedSentence) break;
+                    const startTimeMsStr = highlightedSentence.dataset.startTimeMs;
+                    const endTimeMsStr = highlightedSentence.dataset.endTimeMs;
+
+                    if (!startTimeMsStr || !endTimeMsStr) {
+                        console.error("Edit Clip: Time data missing for the sentence.");
+                        break;
+                    }
+                    const startTimeMs = parseInt(startTimeMsStr, 10);
+                    const endTimeMs = parseInt(endTimeMsStr, 10);
+
+                    if (isNaN(startTimeMs) || isNaN(endTimeMs)) {
+                        console.error("Edit Clip: Invalid time data for the sentence.");
+                        break;
+                    }
+                    if (!audioBuffer) {
+                        console.error("Edit Clip: Audio buffer not available for waveform generation.");
+                        // Potentially alert the user or provide more feedback
+                        alert("Audio buffer is not loaded. Please load the full audio first.");
+                        break;
+                    }
+                    displayWaveform(highlightedSentence, audioBuffer, startTimeMs, endTimeMs);
                     break;
             }
             hideContextualMenu();

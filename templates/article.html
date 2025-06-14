@@ -245,6 +245,17 @@
         /* background-color: rgba(244, 67, 54, 0.1); Optional subtle red background */
     }
     /* End NEW styles for gamepad EMOJI icon */
+
+    .waveform-canvas {
+        display: block; /* Make it a block element to take full width of its parent paragraph */
+        width: 100%;    /* Ensure it respects the parent paragraph's width */
+        height: 75px;   /* Consistent with JS height setting */
+        margin-top: 10px; /* Space above the canvas, separating from sentence */
+        margin-bottom: 10px; /* Space below the canvas */
+        border: 1px solid #cccccc; /* A light border */
+        background-color: #f8f9fa; /* A light background, distinct from sentence highlight */
+        box-sizing: border-box; /* Include padding and border in the element's total width and height */
+    }
 </style>
 {% endblock %}
 
