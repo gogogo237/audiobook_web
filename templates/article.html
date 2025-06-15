@@ -369,6 +369,7 @@
                                   data-translation="{{ sentence_pair.chinese }}"
                                   data-paragraph-index="{{ sentence_pair.paragraph_index }}"
                                   data-sentence-index="{{ sentence_pair.sentence_index_in_paragraph }}"
+                                  data-sentence-db-id="{{ sentence_pair.id }}"
                                   {% if sentence_pair.start_time_ms is not none %} data-start-time-ms="{{ sentence_pair.start_time_ms }}"{% endif %}
                                   {% if sentence_pair.end_time_ms is not none %} data-end-time-ms="{{ sentence_pair.end_time_ms }}"{% endif %}
                                   {% if article.num_audio_parts and article.num_audio_parts > 0 %}
