@@ -814,6 +814,32 @@ function displayWaveform(sentenceElement, audioBuffer, startTimeMs, endTimeMs) {
     });
     toolbar.appendChild(btnAlignEnd);
 
+    const btnCloseWaveform = document.createElement('button');
+    btnCloseWaveform.className = 'waveform-toolbar-button close-waveform-button';
+    btnCloseWaveform.innerHTML = '❌';
+    btnCloseWaveform.title = 'Hide Waveform';
+    btnCloseWaveform.addEventListener('click', () => {
+        // sentenceElement is available in the scope of displayWaveform function
+        if (sentenceElement) {
+            clearExistingWaveform(sentenceElement);
+            // After clearing, check if the contextual menu needs its "Edit Clip" item reset
+            if (contextualMenu.style.display === 'block' && highlightedSentence === sentenceElement) {
+                const editClipMenuItem = contextualMenu.querySelector('.contextual-menu-item[data-action="edit-audio-clip"]');
+                if (editClipMenuItem) {
+                    const menuIcon = editClipMenuItem.querySelector('.menu-icon');
+                    const menuText = editClipMenuItem.querySelector('.menu-text');
+                    if (menuIcon) menuIcon.innerHTML = '✏️';
+                    if (menuText) menuText.innerHTML = 'Edit Clip';
+                    editClipMenuItem.title = 'Edit Clip for this sentence';
+                    console.log("Close Waveform button: Context menu 'Edit Clip' item reset.");
+                }
+            }
+        } else {
+            console.error("CloseWaveform: sentenceElement not found in displayWaveform scope.");
+        }
+    });
+    toolbar.appendChild(btnCloseWaveform);
+
     const ORIGINAL_WAVEFORM_MS_PER_PIXEL = WAVEFORM_MS_PER_PIXEL; // Should be 10
     const MAX_CANVAS_WIDTH = 16384; // Max width based on common browser limits (e.g., Safari)
     let effectiveMsPerPixel = ORIGINAL_WAVEFORM_MS_PER_PIXEL;
@@ -934,7 +960,7 @@ function displayWaveform(sentenceElement, audioBuffer, startTimeMs, endTimeMs) {
                     return;
                 }
             }
-
+            
             const currentEndTimeMsStr = highlightedSentence.dataset.endTimeMs;
             if (!currentEndTimeMsStr) {
                  console.error("Waveform CTRL+Click: Original end time (data-end-time-ms) missing on highlighted sentence.");
@@ -1130,8 +1156,8 @@ function displayWaveform(sentenceElement, audioBuffer, startTimeMs, endTimeMs) {
     const sentenceParentP = sentenceElement.parentElement;
     if (sentenceParentP) {
         // Insert scrollContainer first, then toolbar before it, so toolbar is visually on top.
-        sentenceParentP.insertAdjacentElement('afterend', scrollContainer);
-        sentenceParentP.insertAdjacentElement('afterend', toolbar);
+        sentenceParentP.insertAdjacentElement('afterend', scrollContainer); 
+        sentenceParentP.insertAdjacentElement('afterend', toolbar); 
     } else {
         console.error('displayWaveform: Sentence element has no parent. Cannot insert waveform container or toolbar.');
         return; // Important to stop if parent is missing
