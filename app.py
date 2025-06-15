@@ -958,7 +958,7 @@ def execute_task_for_article(article_id):
         if not article:
             return jsonify({"status": "error", "message": "Article not found."}), 404
 
-        if not article.get('converted_mp3_path'):
+        if not article['converted_mp3_path']:
             return jsonify({"status": "error", "message": "Article does not have a converted MP3 audio file."}), 400
 
         # 'converted_mp3_path' should store the absolute path or a path that can be reliably found.
