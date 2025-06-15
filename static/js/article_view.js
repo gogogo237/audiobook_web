@@ -1093,17 +1093,29 @@ function displayWaveform(sentenceElement, audioBuffer, startTimeMs, endTimeMs) {
                 } else {
                     setActiveSentence(targetSentence, "click_new_sentence");
                     hideContextualMenu();
-                    if (isAudiobookModeFull && audioContext && audioBuffer) {
-                        playSentenceAudio(targetSentence, false);
-                    } else if (isAudiobookModeParts && audioContext && audioBuffer) {
-                        const sentencePartIndexStr = targetSentence.dataset.audioPartIndex;
-                        if (sentencePartIndexStr !== undefined) {
-                            const sentencePartIndex = parseInt(sentencePartIndexStr, 10);
-                            if (sentencePartIndex === currentLoadedAudioPartIndex) {
-                                playSentenceAudio(targetSentence, true);
-                            } else {
-                                const radioToSelect = document.querySelector(`#audio-part-selector-playback input[name="audio_part_playback"][value="${sentencePartIndex}"]`);
-                                if (radioToSelect) radioToSelect.checked = true;
+
+                    let waveformIsVisibleForThisSentence = false;
+                    if (targetSentence.parentElement &&
+                        targetSentence.parentElement.nextElementSibling &&
+                        targetSentence.parentElement.nextElementSibling.classList.contains('waveform-scroll-container')) {
+                        waveformIsVisibleForThisSentence = true;
+                    }
+                    // console.log("Sentence clicked. Waveform visible:", waveformIsVisibleForThisSentence);
+
+                    if (!waveformIsVisibleForThisSentence) {
+                        if (isAudiobookModeFull && audioContext && audioBuffer) {
+                            playSentenceAudio(targetSentence, false, null); // Play from beginning
+                        } else if (isAudiobookModeParts && audioContext && audioBuffer) {
+                            const sentencePartIndexStr = targetSentence.dataset.audioPartIndex;
+                            if (sentencePartIndexStr !== undefined) {
+                                const sentencePartIndex = parseInt(sentencePartIndexStr, 10);
+                                if (sentencePartIndex === currentLoadedAudioPartIndex) {
+                                    playSentenceAudio(targetSentence, true, null); // Play from beginning
+                                } else {
+                                    // If part doesn't match, select the radio button for that part, don't auto-play.
+                                    const radioToSelect = document.querySelector(`#audio-part-selector-playback input[name="audio_part_playback"][value="${sentencePartIndex}"]`);
+                                    if (radioToSelect) radioToSelect.checked = true;
+                                }
                             }
                         }
                     }
