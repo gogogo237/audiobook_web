@@ -199,7 +199,7 @@ h1, h2 {
 
 #sentence-selection-ui-container {
     display: none; /* Initially hidden, JS will change to flex for animation */
-    position: absolute;
+    position: fixed; /* Changed from absolute to fixed */
     bottom: 50px; /* Adjust based on toggle button size and desired offset */
     left: 60px;   /* Adjust based on toggle button size and desired offset */
     width: 300px;
