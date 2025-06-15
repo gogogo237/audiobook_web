@@ -93,6 +93,39 @@ document.addEventListener('DOMContentLoaded', function() {
         }
     }
 
+    function getAdjacentSentence(currentSentenceElement, direction) {
+        if (!sentenceElementsArray || sentenceElementsArray.length === 0) {
+            console.error("JS: getAdjacentSentence - sentenceElementsArray is not populated or empty.");
+            return null;
+        }
+
+        const currentIndex = sentenceElementsArray.indexOf(currentSentenceElement);
+
+        if (currentIndex === -1) {
+            console.error("JS: getAdjacentSentence - currentSentenceElement not found in sentenceElementsArray.");
+            return null;
+        }
+
+        if (direction === 'previous') {
+            if (currentIndex > 0) {
+                return sentenceElementsArray[currentIndex - 1];
+            } else {
+                // console.log("JS: getAdjacentSentence - At the first sentence, no previous.");
+                return null; // It's the first sentence, no previous
+            }
+        } else if (direction === 'next') {
+            if (currentIndex < sentenceElementsArray.length - 1) {
+                return sentenceElementsArray[currentIndex + 1];
+            } else {
+                // console.log("JS: getAdjacentSentence - At the last sentence, no next.");
+                return null; // It's the last sentence, no next
+            }
+        } else {
+            console.error("JS: getAdjacentSentence - Invalid direction provided:", direction);
+            return null;
+        }
+    }
+
     function initAudioContextGlobally() {
         if (!audioContext && (window.AudioContext || window.webkitAudioContext)) {
             try {
@@ -495,9 +528,16 @@ function clearExistingWaveform(sentenceElement) {
         console.error("clearExistingWaveform: sentenceElement or its parent is null.");
         return;
     }
-    const potentialContainer = sentenceElement.parentElement.nextElementSibling;
-    if (potentialContainer && potentialContainer.classList.contains('waveform-scroll-container')) {
-        potentialContainer.remove();
+    // Remove toolbar if it's the next sibling
+    let nextSibling = sentenceElement.parentElement.nextElementSibling;
+    if (nextSibling && nextSibling.classList.contains('waveform-toolbar')) {
+        nextSibling.remove();
+        // After removing toolbar, the scroll container would be the (new) next sibling
+        nextSibling = sentenceElement.parentElement.nextElementSibling;
+    }
+    // Remove scroll container if it's the (new) next sibling
+    if (nextSibling && nextSibling.classList.contains('waveform-scroll-container')) {
+        nextSibling.remove();
     }
 }
 
@@ -598,7 +638,181 @@ function displayWaveform(sentenceElement, audioBuffer, startTimeMs, endTimeMs) {
         return;
     }
 
-    clearExistingWaveform(sentenceElement); // This will be updated later to target the container
+    clearExistingWaveform(sentenceElement);
+
+    // Create toolbar and buttons
+    const toolbar = document.createElement('div');
+    toolbar.className = 'waveform-toolbar';
+
+    const btnAlignStart = document.createElement('button');
+    btnAlignStart.className = 'waveform-toolbar-button align-start-prev-end';
+    btnAlignStart.innerHTML = '⏮️|';
+    btnAlignStart.title = 'Align start with previous sentence\'s end';
+    btnAlignStart.addEventListener('click', async () => {
+        if (!highlightedSentence) {
+            console.warn("Align Start: No highlighted sentence.");
+            alert("Please select a sentence first.");
+            return;
+        }
+
+        const prevSentence = getAdjacentSentence(highlightedSentence, 'previous');
+        if (!prevSentence) {
+            console.log("Align Start: No previous sentence found.");
+            alert("No previous sentence found to align with.");
+            return;
+        }
+
+        const prevEndTimeMsStr = prevSentence.dataset.endTimeMs;
+        if (!prevEndTimeMsStr) {
+            console.error("Align Start: Previous sentence is missing 'data-end-time-ms'.");
+            alert("Previous sentence does not have a recorded end time.");
+            return;
+        }
+        const prevEndTimeMs = parseInt(prevEndTimeMsStr, 10);
+        if (isNaN(prevEndTimeMs)) {
+            console.error("Align Start: Previous sentence 'data-end-time-ms' is not a valid number.");
+            alert("Previous sentence's end time is not a valid number.");
+            return;
+        }
+
+        const currentEndTimeMsStr = highlightedSentence.dataset.endTimeMs;
+        if (!currentEndTimeMsStr) {
+            console.error("Align Start: Current sentence missing 'data-end-time-ms' for validation.");
+            alert("Current sentence is missing its end time for validation.");
+            return;
+        }
+        const currentEndTimeMs = parseInt(currentEndTimeMsStr, 10);
+        if (isNaN(currentEndTimeMs)) {
+            console.error("Align Start: Current sentence 'data-end-time-ms' is not valid for validation.");
+            alert("Current sentence's end time is not valid for validation.");
+            return;
+        }
+
+        if (prevEndTimeMs >= currentEndTimeMs) {
+            const message = `Align Start: Proposed new start time (${prevEndTimeMs}ms) is not less than current end time (${currentEndTimeMs}ms). Aborting.`;
+            console.warn(message);
+            alert("New start time would be at or after the current end time. Operation aborted.");
+            return;
+        }
+
+        let sentenceDbId = highlightedSentence.dataset.sentenceDbId;
+        if (!sentenceDbId) {
+            const pIndex = highlightedSentence.dataset.paragraphIndex;
+            const sIndex = highlightedSentence.dataset.sentenceIndex;
+            // ARTICLE_ID should be available in this scope from DOMContentLoaded
+            if (typeof ARTICLE_ID === 'undefined' || ARTICLE_ID === null) {
+                 console.error("Align Start: ARTICLE_ID is not available.");
+                 alert("Cannot perform action: Article ID is missing.");
+                 return;
+            }
+            console.log(`Align Start: Attempting to fetch sentence_db_id for p:${pIndex}, s:${sIndex}`);
+            sentenceDbId = await fetchSentenceDbIdByIndices(ARTICLE_ID, pIndex, sIndex);
+            if (sentenceDbId) {
+                highlightedSentence.dataset.sentenceDbId = sentenceDbId;
+                console.log(`Align Start: Successfully fetched sentence_db_id: ${sentenceDbId}`);
+            } else {
+                console.error(`Align Start: Could not retrieve sentence_db_id for p:${pIndex}, s:${sIndex}. Timestamp update aborted.`);
+                alert("Failed to retrieve the sentence's database ID. Cannot update timestamp.");
+                return;
+            }
+        }
+
+        const success = await updateSentenceTimestampOnServer(sentenceDbId, 'start', prevEndTimeMs);
+        if (success) {
+            console.log(`Align Start: Timestamp updated successfully for sentence ${sentenceDbId} to ${prevEndTimeMs}ms.`);
+            // updateSentenceTimestampOnServer handles dataset update and waveform refresh if conditions are met.
+            alert("Sentence start time aligned with previous sentence's end.");
+        } else {
+            console.error(`Align Start: Failed to update timestamp on server for sentence ${sentenceDbId}.`);
+            alert("Failed to update sentence start time on the server.");
+        }
+    });
+    toolbar.appendChild(btnAlignStart);
+
+    const btnAlignEnd = document.createElement('button');
+    btnAlignEnd.className = 'waveform-toolbar-button align-end-next-start';
+    btnAlignEnd.innerHTML = '|⏭️';
+    btnAlignEnd.title = 'Align end with next sentence\'s start';
+    btnAlignEnd.addEventListener('click', async () => {
+        if (!highlightedSentence) {
+            console.warn("Align End: No highlighted sentence.");
+            alert("Please select a sentence first.");
+            return;
+        }
+
+        const nextSentence = getAdjacentSentence(highlightedSentence, 'next');
+        if (!nextSentence) {
+            console.log("Align End: No next sentence found.");
+            alert("No next sentence found to align with.");
+            return;
+        }
+
+        const nextStartTimeMsStr = nextSentence.dataset.startTimeMs;
+        if (!nextStartTimeMsStr) {
+            console.error("Align End: Next sentence is missing 'data-start-time-ms'.");
+            alert("Next sentence does not have a recorded start time.");
+            return;
+        }
+        const nextStartTimeMs = parseInt(nextStartTimeMsStr, 10);
+        if (isNaN(nextStartTimeMs)) {
+            console.error("Align End: Next sentence 'data-start-time-ms' is not a valid number.");
+            alert("Next sentence's start time is not a valid number.");
+            return;
+        }
+
+        const currentStartTimeMsStr = highlightedSentence.dataset.startTimeMs;
+        if (!currentStartTimeMsStr) {
+            console.error("Align End: Current sentence missing 'data-start-time-ms' for validation.");
+            alert("Current sentence is missing its start time for validation.");
+            return;
+        }
+        const currentStartTimeMs = parseInt(currentStartTimeMsStr, 10);
+        if (isNaN(currentStartTimeMs)) {
+            console.error("Align End: Current sentence 'data-start-time-ms' is not valid for validation.");
+            alert("Current sentence's start time is not valid for validation.");
+            return;
+        }
+
+        if (nextStartTimeMs <= currentStartTimeMs) {
+            const message = `Align End: Proposed new end time (${nextStartTimeMs}ms) is not greater than current start time (${currentStartTimeMs}ms). Aborting.`;
+            console.warn(message);
+            alert("New end time would be at or before the current start time. Operation aborted.");
+            return;
+        }
+
+        let sentenceDbId = highlightedSentence.dataset.sentenceDbId;
+        if (!sentenceDbId) {
+            const pIndex = highlightedSentence.dataset.paragraphIndex;
+            const sIndex = highlightedSentence.dataset.sentenceIndex;
+            // ARTICLE_ID should be available in this scope from DOMContentLoaded
+             if (typeof ARTICLE_ID === 'undefined' || ARTICLE_ID === null) {
+                 console.error("Align End: ARTICLE_ID is not available.");
+                 alert("Cannot perform action: Article ID is missing.");
+                 return;
+            }
+            console.log(`Align End: Attempting to fetch sentence_db_id for p:${pIndex}, s:${sIndex}`);
+            sentenceDbId = await fetchSentenceDbIdByIndices(ARTICLE_ID, pIndex, sIndex);
+            if (sentenceDbId) {
+                highlightedSentence.dataset.sentenceDbId = sentenceDbId;
+                console.log(`Align End: Successfully fetched sentence_db_id: ${sentenceDbId}`);
+            } else {
+                console.error(`Align End: Could not retrieve sentence_db_id for p:${pIndex}, s:${sIndex}. Timestamp update aborted.`);
+                alert("Failed to retrieve the sentence's database ID. Cannot update timestamp.");
+                return;
+            }
+        }
+
+        const success = await updateSentenceTimestampOnServer(sentenceDbId, 'end', nextStartTimeMs);
+        if (success) {
+            console.log(`Align End: Timestamp updated successfully for sentence ${sentenceDbId} to ${nextStartTimeMs}ms.`);
+            // updateSentenceTimestampOnServer handles dataset update and waveform refresh.
+            alert("Sentence end time aligned with next sentence's start.");
+        } else {
+            console.error(`Align End: Failed to update timestamp on server for sentence ${sentenceDbId}.`);
+            alert("Failed to update sentence end time on the server.");
+        }
+    });
+    toolbar.appendChild(btnAlignEnd);
 
     const ORIGINAL_WAVEFORM_MS_PER_PIXEL = WAVEFORM_MS_PER_PIXEL; // Should be 10
     const MAX_CANVAS_WIDTH = 16384; // Max width based on common browser limits (e.g., Safari)
@@ -639,6 +853,9 @@ function displayWaveform(sentenceElement, audioBuffer, startTimeMs, endTimeMs) {
     scrollContainer.appendChild(canvas);
 
     // Store data on the canvas for the click handler and future playback
+    // Also store button references if needed, e.g., on scrollContainer or canvas
+    // scrollContainer.btnAlignStart = btnAlignStart; // Example if needed later
+    // scrollContainer.btnAlignEnd = btnAlignEnd;     // Example if needed later
     canvas.segmentStartTimeMs = startTimeMs;
     canvas.segmentEndTimeMs = endTimeMs;
     canvas.effectiveMsPerPixel = effectiveMsPerPixel;
@@ -910,11 +1127,14 @@ function displayWaveform(sentenceElement, audioBuffer, startTimeMs, endTimeMs) {
         }
     });
 
-    if (sentenceElement.parentElement) {
-        sentenceElement.parentElement.insertAdjacentElement('afterend', scrollContainer);
+    const sentenceParentP = sentenceElement.parentElement;
+    if (sentenceParentP) {
+        // Insert scrollContainer first, then toolbar before it, so toolbar is visually on top.
+        sentenceParentP.insertAdjacentElement('afterend', scrollContainer);
+        sentenceParentP.insertAdjacentElement('afterend', toolbar);
     } else {
-        console.error('displayWaveform: Sentence element has no parent. Cannot insert waveform container.');
-        return;
+        console.error('displayWaveform: Sentence element has no parent. Cannot insert waveform container or toolbar.');
+        return; // Important to stop if parent is missing
     }
 
     // Ensure canvas has a positive width, otherwise drawing makes no sense.
