@@ -573,110 +573,92 @@ function displayWaveform(sentenceElement, audioBuffer, startTimeMs, endTimeMs) {
     ctx.fillStyle = '#f0f0f0'; // Background color for the canvas
     ctx.fillRect(0, 0, canvas.width, canvas.height);
 
-    ctx.lineWidth = 1;
-    ctx.strokeStyle = 'rgb(0, 123, 255)'; // Waveform line color
-    ctx.beginPath();
+    // ctx.lineWidth = 1; // No longer needed for fill only
+    // ctx.strokeStyle = 'rgb(0, 123, 255)'; // Will be replaced by fillStyle
 
     if (segmentData.length === 0) { // Should have been caught earlier, but defensive
+        // For an empty segment, just show the background, or a flat line if desired.
+        // A flat line might be confusing if it's the same color as a potential fill.
+        // The background is already filled, so just return.
+        // If a line is truly desired for empty segments:
+        ctx.strokeStyle = 'rgb(150, 150, 150)'; // A neutral color for empty line
+        ctx.beginPath();
         ctx.moveTo(0, canvas.height / 2);
         ctx.lineTo(canvas.width, canvas.height / 2);
         ctx.stroke();
-        console.warn("WAVEFORM_DEBUG: segmentData was empty, drew flat line.");
+        console.warn("WAVEFORM_DEBUG: segmentData was empty, drew flat grey line.");
         return;
     }
 
     const samplesPerPixel = segmentData.length / canvas.width;
+    const upperEnvelopePoints = [];
+    const lowerEnvelopePoints = [];
 
     for (let x = 0; x < canvas.width; x++) {
         const startIdx = Math.floor(x * samplesPerPixel);
         const endIdx = Math.floor((x + 1) * samplesPerPixel);
         let maxVal = 0;
 
-        // Find the maximum absolute value in the range of samples for this pixel
         for (let i = startIdx; i < endIdx && i < segmentData.length; i++) {
             const val = Math.abs(segmentData[i]);
             if (val > maxVal) {
                 maxVal = val;
             }
         }
-
-        // If startIdx and endIdx are the same, or endIdx is out of bounds for very short segments
-        // ensure we at least take one sample if available.
         if (startIdx === endIdx && startIdx < segmentData.length) {
              maxVal = Math.abs(segmentData[startIdx]);
         }
 
-
-        // We plot both positive and negative peaks for a more traditional waveform look
-        // The 'v' here represents the normalized amplitude of the peak.
-        // Scaling by 0.5 means the waveform will fill half the canvas height (top and bottom).
-        const v = maxVal; // maxVal is already absolute, typically in range [0, 1] from getChannelData
-                         // If audio samples are [-1, 1], then maxVal is [0, 1]
-                         // If audio samples are different, normalization might be needed earlier.
-                         // The original code used segmentData[i]/2, implying samples might be [-2, 2] or normalization was different.
-                         // Assuming segmentData samples are normalized to [-1, 1], maxVal will be [0,1]
-                         // So, we'll scale it by canvas.height / 2.
-
+        const v = maxVal;
         const amplitude = v * canvas.height / 2;
-        const y_peak = (canvas.height / 2) - amplitude;
-
-        if (x === 0) {
-            ctx.moveTo(x, y_peak);
-        } else {
-            ctx.lineTo(x, y_peak);
-        }
+        upperEnvelopePoints.push({ x: x, y: (canvas.height / 2) - amplitude });
+        lowerEnvelopePoints.push({ x: x, y: (canvas.height / 2) + amplitude });
     }
-    // Extend the upper envelope line to the end of the canvas
+
+    // Handle extensions for the last point to canvas.width
     if (canvas.width > 0 && segmentData.length > 0) {
         const lastSampleIdx = segmentData.length - 1;
-        const lastVal = Math.abs(segmentData[lastSampleIdx]); // This is v for the last sample
+        const lastVal = Math.abs(segmentData[lastSampleIdx]);
         const last_amplitude = lastVal * canvas.height / 2;
-        const last_y_peak = (canvas.height / 2) - last_amplitude;
-        ctx.lineTo(canvas.width, last_y_peak);
-    } else if (canvas.width > 0) { // segmentData is empty or canvas.width is 0 (empty canvas)
-        ctx.lineTo(canvas.width, canvas.height / 2);
+        upperEnvelopePoints.push({ x: canvas.width, y: (canvas.height / 2) - last_amplitude });
+        lowerEnvelopePoints.push({ x: canvas.width, y: (canvas.height / 2) + last_amplitude });
+    } else if (canvas.width > 0) { // segmentData is empty (already handled) or canvas.width is 0
+        // This case might be redundant if segmentData.length === 0 is handled,
+        // but good for safety if canvas.width > 0 but points arrays are empty.
+        upperEnvelopePoints.push({ x: canvas.width, y: canvas.height / 2 });
+        lowerEnvelopePoints.push({ x: canvas.width, y: canvas.height / 2 });
     }
-    ctx.stroke(); // Stroke the upper envelope
 
-    // Now draw the lower envelope
-    ctx.beginPath(); // Essential: Start a new path for the lower envelope
-    for (let x = 0; x < canvas.width; x++) {
-        const startIdx = Math.floor(x * samplesPerPixel);
-        const endIdx = Math.floor((x + 1) * samplesPerPixel);
-        let maxVal = 0;
-        // Find the maximum absolute value in the range of samples for this pixel
-        for (let i = startIdx; i < endIdx && i < segmentData.length; i++) {
-            const val = Math.abs(segmentData[i]);
-            if (val > maxVal) {
-                maxVal = val;
-            }
-        }
-        if (startIdx === endIdx && startIdx < segmentData.length) { // Handle cases with <1 sample per pixel
-             maxVal = Math.abs(segmentData[startIdx]);
-        }
-
-        const v = maxVal; // v is the peak absolute normalized value for this pixel column
-        const amplitude = v * canvas.height / 2;
-        const y_trough = (canvas.height / 2) + amplitude; // Bottom peak for this x
-
-        if (x === 0) {
-            ctx.moveTo(x, y_trough);
-        } else {
-            ctx.lineTo(x, y_trough);
-        }
+    // Ensure there are points to draw to prevent errors
+    if (upperEnvelopePoints.length === 0) {
+        console.warn("WAVEFORM_DEBUG: No points to draw for filled waveform.");
+        return; // Or draw a flat line as in the segmentData.length === 0 case
     }
-    // Extend the lower envelope line to the end of the canvas
-    if (canvas.width > 0 && segmentData.length > 0) {
-        const lastSampleIdx = segmentData.length - 1;
-        const lastVal = Math.abs(segmentData[lastSampleIdx]); // This is v for the last sample
-        const last_amplitude = lastVal * canvas.height / 2;
-        const last_y_trough = (canvas.height / 2) + last_amplitude;
-        ctx.lineTo(canvas.width, last_y_trough);
-    } else if (canvas.width > 0) { // segmentData is empty or canvas.width is 0
-        ctx.lineTo(canvas.width, canvas.height / 2);
+
+    ctx.beginPath();
+    ctx.moveTo(upperEnvelopePoints[0].x, upperEnvelopePoints[0].y);
+
+    for (let i = 1; i < upperEnvelopePoints.length; i++) {
+        ctx.lineTo(upperEnvelopePoints[i].x, upperEnvelopePoints[i].y);
     }
-    ctx.stroke(); // Stroke the lower envelope
-    console.log("WAVEFORM_DEBUG: New waveform drawing with separate upper/lower envelopes completed.");
+
+    // Line to the last point of the lower envelope (which is at canvas.width)
+    // then draw backwards along the lower envelope
+    for (let i = lowerEnvelopePoints.length - 1; i >= 0; i--) {
+        ctx.lineTo(lowerEnvelopePoints[i].x, lowerEnvelopePoints[i].y);
+    }
+
+    ctx.closePath(); // This will connect the first point of lower (at x=0) to first point of upper (at x=0)
+
+    ctx.fillStyle = 'rgba(0, 123, 255, 0.3)'; // Semi-transparent fill
+    ctx.fill();
+
+    // Optional: if an outline on top of the fill is desired
+    // ctx.strokeStyle = 'rgb(0, 123, 255)';
+    // ctx.lineWidth = 1;
+    // ctx.stroke();
+
+    console.log("WAVEFORM_DEBUG: Filled waveform drawing completed.");
 }
 
     // --- Audio Parts View UI ---
