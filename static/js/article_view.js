@@ -45,6 +45,9 @@ document.addEventListener('DOMContentLoaded', function() {
     const beginningSentenceDisplay = document.getElementById('beginning-sentence-display');
     const endingSentenceDisplay = document.getElementById('ending-sentence-display');
     const executeSentenceTaskBtn = document.getElementById('execute-sentence-task-btn');
+    if (executeSentenceTaskBtn) {
+        executeSentenceTaskBtn.textContent = "Update Timestamps for Selection"; // New button text
+    }
     // --- End Sentence Selection UI Elements ---
 
     const toggleAudiobookModeButton = document.getElementById('toggleAudiobookMode');
@@ -1553,127 +1556,145 @@ function displayWaveform(sentenceElement, audioBuffer, startTimeMs, endTimeMs) {
     }
 
     if (executeSentenceTaskBtn) {
-        executeSentenceTaskBtn.addEventListener('click', () => {
+        executeSentenceTaskBtn.addEventListener('click', async () => { // Made async
             // 1. Validation Checks
             if (!beginningSentenceElement || !endingSentenceElement) {
                 alert("Please select both a beginning and an ending sentence.");
                 return;
             }
 
-            const startTimeMs = parseInt(beginningSentenceElement.dataset.startTimeMs, 10);
-            const endTimeMs = parseInt(endingSentenceElement.dataset.endTimeMs, 10);
+            const segmentStartTimeMs = parseInt(beginningSentenceElement.dataset.startTimeMs, 10);
+            const segmentEndTimeMs = parseInt(endingSentenceElement.dataset.endTimeMs, 10);
 
-            if (isNaN(startTimeMs) || isNaN(endTimeMs)) {
+            if (isNaN(segmentStartTimeMs) || isNaN(segmentEndTimeMs)) {
                 alert("Selected sentences are missing timestamp data. Ensure they have 'data-start-time-ms' and 'data-end-time-ms' attributes.");
                 return;
             }
 
-            if (startTimeMs >= endTimeMs) {
+            if (segmentStartTimeMs >= segmentEndTimeMs) {
                 alert("Beginning sentence must come before the ending sentence (based on timestamps).");
                 return;
             }
 
-            // audioBuffer is the global variable for the full decoded audio track
-            if (!audioBuffer) {
-                alert("Full audio track is not loaded. Please load the audio in 'Audiobook Mode (Full Audio)' first.");
-                return;
+            // audioBuffer check might not be strictly necessary if the backend handles audio segment extraction
+            // For now, let's keep it as it implies the audio context for timestamps is somewhat valid.
+            if (!audioBuffer && isAudiobookModeFull) { // Check only if in full audio mode
+                alert("Full audio track is not loaded. Please load the audio in 'Audiobook Mode (Full Audio)' first if you intend to use its timestamps as reference.");
+                // Depending on strictness, could return here.
             }
 
-            // Ensure articleData and articleData.articleId are available
-            if (!articleData || !articleData.articleId) {
+
+            if (!articleData || !ARTICLE_ID) { // Use ARTICLE_ID directly
                 alert("Article ID is missing. Cannot proceed.");
                 return;
             }
 
-            // 2. Collect Sentence Texts
-            const textsToExtract = [];
-            let currentIterSentence = beginningSentenceElement;
-            let foundEndingElement = false;
-            let iterSafetyCounter = 0;
-            const maxPossibleSentences = sentenceElementsArray.length;
-
-            while (currentIterSentence) {
-                textsToExtract.push(currentIterSentence.textContent.trim());
-                if (currentIterSentence === endingSentenceElement) {
-                    foundEndingElement = true;
-                    break;
-                }
-                currentIterSentence = getAdjacentSentence(currentIterSentence, 'next');
-
-                iterSafetyCounter++;
-                if (iterSafetyCounter > maxPossibleSentences) {
-                    console.error("Error collecting sentences: Loop exceeded maximum sentence count.");
-                    alert("An error occurred while collecting sentences: safety limit exceeded. Check console for details.");
-                    return;
-                }
-            }
-
-            if (!foundEndingElement) {
-                console.error("Error collecting sentences: The selected ending sentence was not found by iterating from the beginning sentence.");
-                alert("Could not find the selected ending sentence. Please ensure it appears after the beginning sentence in the article text.");
-                return;
-            }
-
-            // 3. API Request
-            const payload = {
-                start_time_ms: startTimeMs,
-                end_time_ms: endTimeMs,
-                sentence_texts: textsToExtract
-            };
-
             executeSentenceTaskBtn.disabled = true;
             executeSentenceTaskBtn.textContent = "Processing...";
 
-            fetch(`/article/${articleData.articleId}/execute_task`, {
-                method: 'POST',
-                headers: {
-                    'Content-Type': 'application/json',
-                },
-                body: JSON.stringify(payload)
-            })
-            .then(response => {
-                if (!response.ok) {
-                    return response.json().then(errData => {
-                        throw new Error(errData.message || `Server error: ${response.status}`);
-                    }).catch(() => {
-                        throw new Error(`Server error: ${response.status} ${response.statusText}`);
-                    });
-                }
-                const originalResponse = response;
-                return response.blob().then(blob => ({blob, originalResponse}));
-            })
-            .then(({blob, originalResponse}) => {
-                const url = window.URL.createObjectURL(blob);
-                const a = document.createElement('a');
-                a.style.display = 'none';
-                a.href = url;
+            try {
+                // 2. Collect Sentence Data (ID and Text)
+                const sentenceDataForBackend = [];
+                let currentIterSentence = beginningSentenceElement;
+                let foundEndingElement = false;
+                let iterSafetyCounter = 0;
+                const maxPossibleSentences = sentenceElementsArray.length;
 
-                let downloadFilename = "extracted_content.zip";
-                const contentDisposition = originalResponse.headers.get('content-disposition');
-                if (contentDisposition) {
-                    const filenameMatch = contentDisposition.match(/filename="?(.+)"?/i);
-                    if (filenameMatch && filenameMatch.length > 1) {
-                        downloadFilename = filenameMatch[1];
+                while (currentIterSentence) {
+                    let sDbId = currentIterSentence.dataset.sentenceDbId;
+                    const sentenceText = currentIterSentence.textContent.trim();
+
+                    if (!sDbId || sDbId === "undefined" || sDbId === "null") { // Check for string "undefined" or "null" too
+                        const pIndex = currentIterSentence.dataset.paragraphIndex;
+                        const sIndex = currentIterSentence.dataset.sentenceIndex; // HTML uses sentence-index, maps to sentence_index_in_paragraph
+
+                        if (typeof fetchSentenceDbIdByIndices !== 'function') {
+                            alert("Error: Critical function 'fetchSentenceDbIdByIndices' is not available. Aborting.");
+                            return; // Stop processing
+                        }
+
+                        console.log(`JS: Fetching DB ID for P:${pIndex}, S:${sIndex}`);
+                        sDbId = await fetchSentenceDbIdByIndices(ARTICLE_ID, pIndex, sIndex);
+
+                        if (!sDbId) {
+                            alert(`Error fetching database ID for sentence: [P:${pIndex},S:${sIndex}] "${sentenceText.substring(0, 30)}...". Aborting.`);
+                            return; // Stop processing
+                        }
+                        currentIterSentence.dataset.sentenceDbId = sDbId; // Cache it on the element
+                    }
+
+                    sentenceDataForBackend.push({ 'id': parseInt(sDbId, 10), 'text': sentenceText });
+
+                    if (currentIterSentence === endingSentenceElement) {
+                        foundEndingElement = true;
+                        break;
+                    }
+                    currentIterSentence = getAdjacentSentence(currentIterSentence, 'next');
+
+                    iterSafetyCounter++;
+                    if (iterSafetyCounter > maxPossibleSentences + 5) { // Added a small buffer
+                        console.error("Error collecting sentences: Loop exceeded maximum sentence count + buffer.");
+                        alert("An error occurred while collecting sentences: safety limit exceeded. Check console.");
+                        return;
                     }
                 }
-                a.download = downloadFilename;
 
-                document.body.appendChild(a);
-                a.click();
+                if (!foundEndingElement) {
+                    console.error("Error collecting sentences: The selected ending sentence was not found by iterating from the beginning sentence.");
+                    alert("Could not find the selected ending sentence. Please ensure it appears after the beginning sentence.");
+                    return;
+                }
 
-                window.URL.revokeObjectURL(url);
-                document.body.removeChild(a);
+                if (sentenceDataForBackend.length === 0) {
+                    alert("No sentences were collected for processing. Aborting.");
+                    return;
+                }
 
-                alert("Task executed. Files should be downloading.");
-            })
-            .catch(error => {
+                // 3. Construct Payload
+                const payload = {
+                    start_time_ms: segmentStartTimeMs, // This is T_initial for the segment
+                    end_time_ms: segmentEndTimeMs,
+                    sentences_data: sentenceDataForBackend
+                };
+
+                // 4. API Call
+                const response = await fetch(`/article/${ARTICLE_ID}/execute_task`, {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                    },
+                    body: JSON.stringify(payload)
+                });
+
+                const jsonData = await response.json();
+
+                // 5. Response Handling
+                if (response.ok && jsonData.status === 'success') {
+                    if (jsonData.updated_sentences && Array.isArray(jsonData.updated_sentences)) {
+                        jsonData.updated_sentences.forEach(updatedItem => {
+                            // Ensure updatedId is treated as a string for querySelector if it was stored as string in dataset
+                            const sentenceElToUpdate = document.querySelector(`.english-sentence[data-sentence-db-id='${updatedItem.id}']`);
+                            if (sentenceElToUpdate) {
+                                sentenceElToUpdate.dataset.startTimeMs = updatedItem.new_start_ms;
+                                sentenceElToUpdate.dataset.endTimeMs = updatedItem.new_end_ms;
+                                console.log(`JS: Updated DOM for sentence ID ${updatedItem.id}: Start=${updatedItem.new_start_ms}, End=${updatedItem.new_end_ms}`);
+                            } else {
+                                console.warn(`JS: Could not find sentence element in DOM to update for ID: ${updatedItem.id}`);
+                            }
+                        });
+                    }
+                    alert(jsonData.message || "Timestamps updated successfully.");
+                } else {
+                    throw new Error(jsonData.message || `Server error: ${response.status}`);
+                }
+
+            } catch (error) {
                 console.error('Error executing task:', error);
-                alert(`Error executing task: ${error.message}`);
-            })
-            .finally(() => {
+                alert(`Error executing task: ${error.message || "An unknown error occurred."}`);
+            } finally {
                 executeSentenceTaskBtn.disabled = false;
-                executeSentenceTaskBtn.textContent = "Execute Task";
-            });
+                executeSentenceTaskBtn.textContent = "Update Timestamps for Selection"; // Reset button text
+            }
         });
     }
 

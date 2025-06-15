@@ -934,87 +934,90 @@ def execute_task_for_article(article_id):
     try:
         data = request.get_json()
         if not data:
-            return jsonify({"message": "Invalid request: No JSON data received."}), 400
+            return jsonify({"status": "error", "message": "Invalid request: No JSON data received."}), 400
 
         start_time_ms = data.get('start_time_ms')
         end_time_ms = data.get('end_time_ms')
-        sentence_texts = data.get('sentence_texts')
+        # Expect sentences_data: list of dicts {'id': sentenceDbId, 'text': 'sentence content...'}
+        sentences_data = data.get('sentences_data')
 
-        if start_time_ms is None or end_time_ms is None or sentence_texts is None:
-            return jsonify({"message": "Invalid request: Missing start_time_ms, end_time_ms, or sentence_texts."}), 400
+        if start_time_ms is None or end_time_ms is None or sentences_data is None:
+            return jsonify({"status": "error", "message": "Invalid request: Missing start_time_ms, end_time_ms, or sentences_data."}), 400
 
-        if not isinstance(start_time_ms, int) or not isinstance(end_time_ms, int) or start_time_ms >= end_time_ms:
-            return jsonify({"message": "Invalid timestamps."}), 400
+        if not isinstance(start_time_ms, int) or not isinstance(end_time_ms, int) or start_time_ms < 0 or end_time_ms <= start_time_ms:
+            return jsonify({"status": "error", "message": "Invalid timestamps. Ensure start_time_ms < end_time_ms and both are non-negative."}), 400
 
-        if not isinstance(sentence_texts, list) or not sentence_texts:
-            return jsonify({"message": "Sentence texts must be a non-empty list."}), 400
+        if not isinstance(sentences_data, list) or not sentences_data:
+            return jsonify({"status": "error", "message": "sentences_data must be a non-empty list."}), 400
+
+        for item in sentences_data:
+            if not isinstance(item, dict) or 'id' not in item or 'text' not in item:
+                return jsonify({"status": "error", "message": "Each item in sentences_data must be a dictionary with 'id' and 'text' keys."}), 400
 
         article = db_manager.get_article_by_id(article_id, app_logger=current_app.logger)
         if not article:
-            return jsonify({"message": "Article not found."}), 404
+            return jsonify({"status": "error", "message": "Article not found."}), 404
 
-        if not article['converted_mp3_path']: # Dictionary access
-            return jsonify({"message": "Article does not have a converted MP3 audio file."}), 400
+        if not article.get('converted_mp3_path'):
+            return jsonify({"status": "error", "message": "Article does not have a converted MP3 audio file."}), 400
 
-        upload_folder = current_app.config.get('UPLOAD_FOLDER', 'uploads')
-        full_audio_path = os.path.join(upload_folder, article['converted_mp3_path']) # Dictionary access
+        # 'converted_mp3_path' should store the absolute path or a path that can be reliably found.
+        # Assuming it's an absolute path or relative to a known location accessible by the app.
+        full_audio_path = article['converted_mp3_path']
 
         if not os.path.exists(full_audio_path):
-            current_app.logger.error(f"Audio file not found at path: {full_audio_path}")
-            return jsonify({"message": f"Full audio file not found on server. Expected at: {article['converted_mp3_path']}"}), 500 # Dictionary access
+            current_app.logger.error(f"Audio file not found at path: {full_audio_path} for article {article_id}")
+            return jsonify({"status": "error", "message": f"Full audio file not found on server. Path: {full_audio_path}"}), 500
 
-        base_filename = "".join(c if c.isalnum() or c in ('.', '_') else '_' for c in article['filename']) # Dictionary access
-        txt_filename = f"partof_{base_filename}.txt"
-        mp3_filename = f"partof_{base_filename}.mp3" # Changed from pcm_filename
-        zip_filename = f"partof_{base_filename}.zip"
+        # Temporary files for Aeneas will be created later, no need for these filenames now.
+        # base_filename = "".join(c if c.isalnum() or c in ('.', '_') else '_' for c in article['filename'])
+        # txt_filename = f"partof_{base_filename}.txt"
+        # mp3_filename = f"partof_{base_filename}.mp3"
+        # zip_filename = f"partof_{base_filename}.zip"
 
-        text_content = "\n".join(sentence_texts) # Corrected newline usage
+        sentence_texts_for_aeneas = [s['text'] for s in sentences_data]
 
         try:
-            current_app.logger.info(f"Loading audio from: {full_audio_path}")
+            current_app.logger.info(f"Loading audio from: {full_audio_path} for article {article_id}, segment {start_time_ms}-{end_time_ms}ms.")
             audio = AudioSegment.from_file(full_audio_path)
-            current_app.logger.info(f"Audio loaded. Duration: {len(audio)}ms, Channels: {audio.channels}, Frame Rate: {audio.frame_rate}, Sample Width: {audio.sample_width} bytes")
+            current_app.logger.info(f"Audio loaded. Duration: {len(audio)}ms, Channels: {audio.channels}, Frame Rate: {audio.frame_rate}, Sample Width: {audio.sample_width} bytes for article {article_id}")
 
             audio_segment = audio[start_time_ms:end_time_ms]
-            current_app.logger.info(f"Audio segment sliced: {len(audio_segment)}ms")
+            current_app.logger.info(f"Audio segment sliced: {len(audio_segment)}ms for article {article_id}")
 
-            # Export to MP3
             mp3_export_buffer = io.BytesIO()
-            audio_segment.export(mp3_export_buffer, format="mp3") # Optional: add bitrate="192k"
+            audio_segment.export(mp3_export_buffer, format="mp3")
             mp3_data_bytes = mp3_export_buffer.getvalue()
-            current_app.logger.info(f"MP3 data exported: {len(mp3_data_bytes)} bytes")
+            current_app.logger.info(f"MP3 data for segment exported: {len(mp3_data_bytes)} bytes for article {article_id}")
 
         except Exception as e:
             current_app.logger.error(f"Error processing audio for article {article_id}: {e}", exc_info=True)
-            return jsonify({"message": f"Error processing audio: {str(e)}"}), 500
+            return jsonify({"status": "error", "message": f"Error processing audio: {str(e)}"}), 500
 
-        # --- SRT Generation using Aeneas ---
         temp_mp3_file_path = None
         temp_txt_file_path = None
-        temp_srt_output_file_path = None # Path for Aeneas to write its output
-        srt_content_bytes = None
+        temp_srt_output_file_path = None
+        parsed_srt_timestamps = []
+        updated_sentence_details = []
 
         try:
-            # 1. Create temporary MP3 file from mp3_data_bytes
-            with tempfile.NamedTemporaryFile(suffix=".mp3", delete=False) as tmp_mp3:
+            # Create temporary files for Aeneas
+            with tempfile.NamedTemporaryFile(suffix=".mp3", delete=False, dir=current_app.config.get('TEMP_FILES_FOLDER')) as tmp_mp3:
                 tmp_mp3.write(mp3_data_bytes)
                 temp_mp3_file_path = tmp_mp3.name
-            current_app.logger.info(f"Temporary MP3 for Aeneas: {temp_mp3_file_path}")
+            current_app.logger.info(f"Temporary MP3 for Aeneas (article {article_id}): {temp_mp3_file_path}")
 
-            # 2. Create temporary TXT file from sentence_texts
-            with tempfile.NamedTemporaryFile(suffix=".txt", delete=False) as tmp_txt_obj:
+            with tempfile.NamedTemporaryFile(suffix=".txt", delete=False, dir=current_app.config.get('TEMP_FILES_FOLDER')) as tmp_txt_obj:
                 temp_txt_file_path = tmp_txt_obj.name
-            audio_processor.create_plain_text_file_from_list(sentence_texts, temp_txt_file_path, logger=current_app.logger)
-            current_app.logger.info(f"Temporary TXT for Aeneas: {temp_txt_file_path}")
+            # Use sentence_texts_for_aeneas which is a list of strings
+            audio_processor.create_plain_text_file_from_list(sentence_texts_for_aeneas, temp_txt_file_path, logger=current_app.logger)
+            current_app.logger.info(f"Temporary TXT for Aeneas (article {article_id}): {temp_txt_file_path}")
 
-            # 3. Get a path for Aeneas to write its SRT output
-            with tempfile.NamedTemporaryFile(suffix=".srt", delete=False) as tmp_srt_out_obj:
+            with tempfile.NamedTemporaryFile(suffix=".srt", delete=False, dir=current_app.config.get('TEMP_FILES_FOLDER')) as tmp_srt_out_obj:
                 temp_srt_output_file_path = tmp_srt_out_obj.name
-            current_app.logger.info(f"Temporary SRT output path for Aeneas: {temp_srt_output_file_path}")
+            current_app.logger.info(f"Temporary SRT output path for Aeneas (article {article_id}): {temp_srt_output_file_path}")
 
             python_executable = current_app.config.get('AENEAS_PYTHON_PATH', sys.executable)
-            current_app.logger.info(f"Using Python executable for Aeneas: {python_executable}")
-
             audio_processor.run_aeneas_alignment(
                 temp_mp3_file_path,
                 temp_txt_file_path,
@@ -1023,52 +1026,64 @@ def execute_task_for_article(article_id):
                 logger=current_app.logger
             )
 
-            with open(temp_srt_output_file_path, 'r', encoding='utf-8') as f_srt_content:
-                srt_file_content_str = f_srt_content.read()
+            parsed_srt_timestamps = audio_processor.parse_aeneas_srt_file(temp_srt_output_file_path, logger=current_app.logger)
+            if not parsed_srt_timestamps:
+                 current_app.logger.warning(f"Aeneas SRT parsing yielded no timestamps for article {article_id}, segment {start_time_ms}-{end_time_ms}. Path: {temp_srt_output_file_path}")
+                 # Still proceed to cleanup, but then return error or empty success depending on requirements for this case
+                 # For now, let's assume this is an error if sentences were expected to be aligned.
+                 if sentences_data: # If there were sentences to align, and we got no timestamps, it's an issue.
+                    return jsonify({"status": "error", "message": "Failed to parse SRT timestamps from Aeneas output."}), 500
 
-            if srt_file_content_str and srt_file_content_str.strip():
-                srt_content_bytes = srt_file_content_str.encode('utf-8')
-                current_app.logger.info(f"SRT content generated successfully by Aeneas ({len(srt_content_bytes)} bytes).")
-            else:
-                current_app.logger.warning("Aeneas produced an empty or whitespace-only SRT file.")
 
-        except Exception as e_aeneas:
-            current_app.logger.error(f"Error during Aeneas SRT generation: {e_aeneas}", exc_info=True)
+            # --- New SRT processing and DB update logic ---
+            if len(parsed_srt_timestamps) != len(sentences_data):
+                current_app.logger.error(f"SRT entry count mismatch for article {article_id}: Expected {len(sentences_data)}, got {len(parsed_srt_timestamps)} from SRT.")
+                return jsonify({"status": "error", "message": "SRT entry count mismatch"}), 400
+
+            segment_initial_absolute_start_time_ms = start_time_ms # This is T_initial for the segment
+
+            for i, sentence_data_item in enumerate(sentences_data):
+                relative_start_ms, relative_end_ms = parsed_srt_timestamps[i]
+
+                new_abs_start = segment_initial_absolute_start_time_ms + relative_start_ms
+                new_abs_end = segment_initial_absolute_start_time_ms + relative_end_ms
+                sentence_db_id = sentence_data_item['id']
+
+                db_manager.update_sentence_single_timestamp(sentence_db_id, 'start', new_abs_start, app_logger=current_app.logger)
+                db_manager.update_sentence_single_timestamp(sentence_db_id, 'end', new_abs_end, app_logger=current_app.logger)
+
+                updated_sentence_details.append({
+                    'id': sentence_db_id,
+                    'new_start_ms': new_abs_start,
+                    'new_end_ms': new_abs_end
+                })
+
+            current_app.logger.info(f"Successfully updated timestamps for {len(updated_sentence_details)} sentences for article {article_id}.")
+            return jsonify({
+                "status": "success",
+                "message": f"{len(updated_sentence_details)} sentences updated",
+                "updated_sentences": updated_sentence_details
+            }), 200
+
+        except Exception as e_proc:
+            current_app.logger.error(f"Error during SRT generation or DB update for article {article_id}: {e_proc}", exc_info=True)
+            # Specific error for Aeneas failure vs other internal error
+            if "Aeneas" in str(e_proc): # Simplistic check, might need refinement
+                 return jsonify({"status": "error", "message": f"Aeneas processing failed: {str(e_proc)}"}), 500
+            return jsonify({"status": "error", "message": f"An internal error occurred during processing: {str(e_proc)}"}), 500
         finally:
-            if temp_mp3_file_path and os.path.exists(temp_mp3_file_path):
-                os.remove(temp_mp3_file_path)
-                current_app.logger.info(f"Cleaned up temporary MP3: {temp_mp3_file_path}")
-            if temp_txt_file_path and os.path.exists(temp_txt_file_path):
-                os.remove(temp_txt_file_path)
-                current_app.logger.info(f"Cleaned up temporary TXT: {temp_txt_file_path}")
-            if temp_srt_output_file_path and os.path.exists(temp_srt_output_file_path):
-                os.remove(temp_srt_output_file_path)
-                current_app.logger.info(f"Cleaned up temporary Aeneas SRT output: {temp_srt_output_file_path}")
-        # --- End SRT Generation ---
-
-        zip_buffer = io.BytesIO()
-        with zipfile.ZipFile(zip_buffer, "w", zipfile.ZIP_DEFLATED) as zf:
-            zf.writestr(txt_filename, text_content.encode('utf-8'))
-            zf.writestr(mp3_filename, mp3_data_bytes) # Use mp3_filename and mp3_data_bytes
-            if srt_content_bytes:
-                srt_filename = f"partof_{base_filename}.srt"
-                zf.writestr(srt_filename, srt_content_bytes)
-                current_app.logger.info(f"Added SRT file to zip: {srt_filename}")
-            else:
-                current_app.logger.info("No SRT content generated or Aeneas failed; SRT file not added to zip.")
-
-        zip_buffer.seek(0)
-
-        return send_file(
-            zip_buffer,
-            as_attachment=True,
-            download_name=zip_filename,
-            mimetype='application/zip'
-        )
+            # Ensure all temporary files are cleaned up
+            for temp_file_path in [temp_mp3_file_path, temp_txt_file_path, temp_srt_output_file_path]:
+                if temp_file_path and os.path.exists(temp_file_path):
+                    try:
+                        os.remove(temp_file_path)
+                        current_app.logger.info(f"Cleaned up temporary file: {temp_file_path} for article {article_id}")
+                    except Exception as e_cleanup:
+                        current_app.logger.error(f"Error cleaning up temporary file {temp_file_path} for article {article_id}: {e_cleanup}", exc_info=True)
 
     except Exception as e:
-        current_app.logger.error(f"Error in execute_task_for_article for article_id {article_id}: {e}", exc_info=True)
-        return jsonify({"message": f"An unexpected error occurred: {str(e)}"}), 500
+        current_app.logger.error(f"Critical error in execute_task_for_article for article_id {article_id}: {e}", exc_info=True)
+        return jsonify({"status": "error", "message": f"An unexpected critical error occurred: {str(e)}"}), 500
 
 
 if __name__ == '__main__':
