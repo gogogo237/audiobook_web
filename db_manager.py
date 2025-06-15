@@ -524,6 +524,54 @@ def update_sentence_timestamps(article_id, timestamps_data, app_logger=None):
     finally:
         if conn: conn.close()
 
+def update_sentence_single_timestamp(sentence_id, timestamp_type, new_time_ms, app_logger=None):
+    logger = app_logger if app_logger else default_logger
+
+    if timestamp_type not in ['start', 'end']:
+        if logger: logger.error(f"DB: Invalid timestamp_type '{timestamp_type}' for sentence {sentence_id}.")
+        return False
+
+    if not isinstance(new_time_ms, (int, float)) or new_time_ms < 0: # Allow float temporarily, will be rounded by caller or here
+        if logger: logger.error(f"DB: Invalid new_time_ms '{new_time_ms}' for sentence {sentence_id}. Must be non-negative number.")
+        return False
+
+    new_time_ms = int(round(new_time_ms)) # Ensure it's an integer for DB
+
+    column_to_update = "start_time_ms" if timestamp_type == 'start' else "end_time_ms"
+
+    sql = f"UPDATE sentences SET {column_to_update} = ? WHERE id = ?"
+
+    conn = get_db_connection()
+    try:
+        cursor = conn.cursor()
+        if logger: logger.info(f"DB: Executing SQL: {sql} with params ({new_time_ms}, {sentence_id})")
+        cursor.execute(sql, (new_time_ms, sentence_id))
+        conn.commit()
+
+        if cursor.rowcount > 0:
+            if logger: logger.info(f"DB: Successfully updated {timestamp_type} for sentence {sentence_id} to {new_time_ms}ms.")
+            return True
+        else:
+            if logger: logger.warning(f"DB: No row found for sentence ID {sentence_id} or timestamp value unchanged for {timestamp_type}.")
+            # It's possible the value was the same, so rowcount is 0.
+            # Consider this a success if no error, or query current value to be sure.
+            # For now, if rowcount is 0, assume it's not an error state unless an exception occurs.
+            # To be stricter, one could query the value before and after, or check if sentence_id exists.
+            # However, the Flask endpoint already returns success if db_manager returns true and rowcount could be 0
+            # if the value is the same. Let's return True if no error and rowcount is 0.
+            # A more robust check would be to fetch the sentence and see if the value actually changed, or if it was already set to new_time_ms
+            # For now, if no error, we'll consider it "processed". The calling JS might need to handle the case where the value didn't change.
+            # Re-evaluating: if rowcount is 0, it means no update happened. This could be due to sentence_id not found.
+            # This should be treated as a failure to update as intended.
+            return False
+
+    except sqlite3.Error as e:
+        if logger: logger.error(f"DB: SQLite error updating {timestamp_type} for sentence {sentence_id}: {e}", exc_info=True)
+        if conn: conn.rollback()
+        return False
+    finally:
+        if conn: conn.close()
+
 # --- Path and MP3 Part Update Functions ---
 def update_article_srt_path(article_id, srt_path, app_logger=None):
     logger = app_logger if app_logger else default_logger

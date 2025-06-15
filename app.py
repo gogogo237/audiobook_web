@@ -788,6 +788,48 @@ def save_reading_location(article_id):
         app.logger.error(f"APP: Failed to save reading location for article {article_id} (book {book_id_for_location}): {e}", exc_info=True)
         return jsonify({'status': 'error', 'message': f'Failed to save location: {str(e)}'}), 500
 
+@app.route('/article/<int:article_id>/sentence/<int:sentence_id>/update_timestamp', methods=['POST'])
+def update_sentence_timestamp_route(article_id, sentence_id):
+    app.logger.info(f"APP: Received request to update timestamp for article {article_id}, sentence {sentence_id}")
+    try:
+        data = request.get_json()
+        if not data:
+            app.logger.warning(f"APP: No JSON data received for timestamp update on sentence {sentence_id}.")
+            return jsonify(status='error', message='No data provided.'), 400
+
+        timestamp_type = data.get('timestamp_type')
+        new_time_ms = data.get('new_time_ms')
+
+        if timestamp_type not in ['start', 'end']:
+            app.logger.warning(f"APP: Invalid timestamp_type '{timestamp_type}' for sentence {sentence_id}.")
+            return jsonify(status='error', message="Invalid timestamp_type. Must be 'start' or 'end'."), 400
+
+        if not isinstance(new_time_ms, (int, float)) or new_time_ms < 0:
+            app.logger.warning(f"APP: Invalid new_time_ms '{new_time_ms}' for sentence {sentence_id}.")
+            return jsonify(status='error', message='new_time_ms must be a non-negative number.'), 400
+
+        # Convert to integer if it's a float, as ms are usually integers
+        new_time_ms = int(round(new_time_ms))
+
+        app.logger.info(f"APP: Calling db_manager to update sentence {sentence_id}, type: {timestamp_type}, time: {new_time_ms}ms.")
+        success = db_manager.update_sentence_single_timestamp(
+            sentence_id=sentence_id,
+            timestamp_type=timestamp_type,
+            new_time_ms=new_time_ms,
+            app_logger=app.logger
+        )
+
+        if success:
+            app.logger.info(f"APP: Successfully updated timestamp for sentence {sentence_id}.")
+            return jsonify(status='success', message='Timestamp updated successfully.')
+        else:
+            app.logger.error(f"APP: db_manager.update_sentence_single_timestamp failed for sentence {sentence_id}.")
+            return jsonify(status='error', message='Failed to update timestamp in database.'), 500
+
+    except Exception as e:
+        app.logger.error(f"APP: Unexpected error in update_sentence_timestamp_route for sentence {sentence_id}: {e}", exc_info=True)
+        return jsonify(status='error', message='An unexpected server error occurred.'), 500
+
 @app.route('/article/<int:article_id>/download_mp3')
 def download_mp3_for_article(article_id):
     # ... (no change)
