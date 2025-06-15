@@ -198,15 +198,25 @@ h1, h2 {
 }
 
 #sentence-selection-ui-container {
-    /* display: none; */ /* Default, will be toggled by JS. Keep it here for reference but main control is inline style for initial state. */
-    display: flex; /* This will be overridden by inline style 'display: none;' initially */
+    display: none; /* Initially hidden, JS will change to flex for animation */
+    position: absolute;
+    bottom: 50px; /* Adjust based on toggle button size and desired offset */
+    left: 60px;   /* Adjust based on toggle button size and desired offset */
+    width: 300px;
+    max-width: 350px;
     flex-direction: column;
     border: 1px solid #ccc;
     padding: 15px;
-    margin: 15px 0;
     background-color: #f9f9f9;
     border-radius: 4px;
     box-shadow: 0 2px 4px rgba(0,0,0,0.05);
+    z-index: 1006;
+    transform-origin: bottom left;
+    transition: transform 0.2s ease-out, opacity 0.2s ease-out;
+    /* Styles for the hidden state (to be manipulated by JS) */
+    transform: scale(0.8); /* Applied when hidden after transition out */
+    opacity: 0; /* Applied when hidden after transition out */
+    pointer-events: none; /* Applied when hidden */
 }
 
 #sentence-selection-ui-container label {

@@ -1529,20 +1529,26 @@ function displayWaveform(sentenceElement, audioBuffer, startTimeMs, endTimeMs) {
     // --- Sentence Selection UI Event Listeners ---
     if (toggleSentenceSelectionBtn && sentenceSelectionUIContainer) {
         toggleSentenceSelectionBtn.addEventListener('click', () => {
-            console.log("DEBUG: Toggle button clicked!");
-            console.log("DEBUG: isSentenceSelectionUIVisible before toggle:", isSentenceSelectionUIVisible);
             isSentenceSelectionUIVisible = !isSentenceSelectionUIVisible;
-            console.log("DEBUG: isSentenceSelectionUIVisible after toggle:", isSentenceSelectionUIVisible);
             if (isSentenceSelectionUIVisible) {
                 sentenceSelectionUIContainer.style.display = 'flex';
+                setTimeout(() => {
+                    sentenceSelectionUIContainer.style.transform = 'scale(1)';
+                    sentenceSelectionUIContainer.style.opacity = '1';
+                    sentenceSelectionUIContainer.style.pointerEvents = 'auto';
+                }, 10); // Small delay for display change to be processed
                 toggleSentenceSelectionBtn.textContent = '✅';
-                toggleSentenceSelectionBtn.title = 'Hide Sentence Actions Panel'; // Updated title
+                toggleSentenceSelectionBtn.title = 'Hide Sentence Actions Panel';
             } else {
-                sentenceSelectionUIContainer.style.display = 'none';
-                toggleSentenceSelectionBtn.textContent = '⚙️'; // Corrected icon for "Open" state
-                toggleSentenceSelectionBtn.title = 'Open/Close Sentence Actions Panel'; // Corrected title for "Open" state
+                sentenceSelectionUIContainer.style.transform = 'scale(0.8)';
+                sentenceSelectionUIContainer.style.opacity = '0';
+                sentenceSelectionUIContainer.style.pointerEvents = 'none';
+                setTimeout(() => {
+                    sentenceSelectionUIContainer.style.display = 'none';
+                }, 200); // Match CSS transition duration
+                toggleSentenceSelectionBtn.textContent = '⚙️';
+                toggleSentenceSelectionBtn.title = 'Open/Close Sentence Actions Panel';
             }
-            console.log("DEBUG: Panel display style set to:", sentenceSelectionUIContainer.style.display);
         });
     }
 
@@ -1727,9 +1733,12 @@ function displayWaveform(sentenceElement, audioBuffer, startTimeMs, endTimeMs) {
 
                         beginningSentenceText = highlightedSentence.textContent.trim();
                         beginningSentenceElement = highlightedSentence;
-                        if (beginningSentenceDisplay) beginningSentenceDisplay.textContent = beginningSentenceText;
+                        // if (beginningSentenceDisplay) beginningSentenceDisplay.textContent = beginningSentenceText; // Old version
+                        const overallIndexBeginning = sentenceElementsArray.indexOf(highlightedSentence) + 1;
+                        const shortTextBeginning = highlightedSentence.textContent.trim().split(' ').slice(0, 5).join(' ') + '...';
+                        if (beginningSentenceDisplay) beginningSentenceDisplay.textContent = "Sentence " + overallIndexBeginning + ": " + shortTextBeginning;
                         highlightedSentence.classList.add('selected-beginning-sentence');
-                        console.log("Beginning sentence set:", beginningSentenceText);
+                        console.log("Beginning sentence set: Index", overallIndexBeginning, "Text:", shortTextBeginning);
                     }
                     hideContextualMenu(); // Ensure menu hides after action
                     break;
@@ -1749,9 +1758,12 @@ function displayWaveform(sentenceElement, audioBuffer, startTimeMs, endTimeMs) {
 
                         endingSentenceText = highlightedSentence.textContent.trim();
                         endingSentenceElement = highlightedSentence;
-                        if (endingSentenceDisplay) endingSentenceDisplay.textContent = endingSentenceText;
+                        // if (endingSentenceDisplay) endingSentenceDisplay.textContent = endingSentenceText; // Old version
+                        const overallIndexEnding = sentenceElementsArray.indexOf(highlightedSentence) + 1;
+                        const shortTextEnding = highlightedSentence.textContent.trim().split(' ').slice(0, 5).join(' ') + '...';
+                        if (endingSentenceDisplay) endingSentenceDisplay.textContent = "Sentence " + overallIndexEnding + ": " + shortTextEnding;
                         highlightedSentence.classList.add('selected-ending-sentence');
-                        console.log("Ending sentence set:", endingSentenceText);
+                        console.log("Ending sentence set: Index", overallIndexEnding, "Text:", shortTextEnding);
                     }
                     hideContextualMenu(); // Ensure menu hides after action
                     break;
