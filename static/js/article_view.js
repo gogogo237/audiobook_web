@@ -35,6 +35,14 @@ document.addEventListener('DOMContentLoaded', function() {
     const restoreLocationButton = document.getElementById('restoreLocationButton');
     const gamepadStatusEmoji = document.getElementById('gamepad-status-emoji'); // Changed from gamepadStatusIndicator
 
+    // --- Sentence Selection UI Elements ---
+    const toggleSentenceSelectionBtn = document.getElementById('toggle-sentence-selection-btn');
+    const sentenceSelectionUIContainer = document.getElementById('sentence-selection-ui-container');
+    const beginningSentenceDisplay = document.getElementById('beginning-sentence-display');
+    const endingSentenceDisplay = document.getElementById('ending-sentence-display');
+    const executeSentenceTaskBtn = document.getElementById('execute-sentence-task-btn');
+    // --- End Sentence Selection UI Elements ---
+
     const toggleAudiobookModeButton = document.getElementById('toggleAudiobookMode');
     const localAudioFileInput = document.getElementById('localAudioFile');
     const audioFileNameSpan = document.getElementById('audioFileName');
@@ -69,6 +77,16 @@ document.addEventListener('DOMContentLoaded', function() {
     const CLICK_THRESHOLD_AUTOSAVE = 5;
     const WAVEFORM_MS_PER_PIXEL = 10; // Each pixel represents 10ms of audio
 
+    // --- Sentence Selection State ---
+    let isSentenceSelectionUIVisible = false;
+    let beginningSentenceText = "";
+    let endingSentenceText = "";
+    let beginningSentenceElement = null;
+    let endingSentenceElement = null;
+    const placeholderBeginning = "No beginning sentence selected.";
+    const placeholderEnding = "No ending sentence selected.";
+    // --- End Sentence Selection State ---
+
     // --- Gamepad State ---
     let gamepadIndex = null;
     let previousButtonStates = [];
@@ -81,6 +99,11 @@ document.addEventListener('DOMContentLoaded', function() {
     const BUTTON_Y_INDEX = 3;
 
     // --- Initialization Functions ---
+    function initializeSentenceSelectionDisplays() {
+        if (beginningSentenceDisplay) beginningSentenceDisplay.textContent = placeholderBeginning;
+        if (endingSentenceDisplay) endingSentenceDisplay.textContent = placeholderEnding;
+    }
+
     function populateSentenceElementsArray() {
         sentenceElementsArray = Array.from(document.querySelectorAll('.english-sentence'));
         if (HAS_TIMESTAMPS) {
@@ -362,6 +385,25 @@ document.addEventListener('DOMContentLoaded', function() {
             }
             menuHTML += `<div class="contextual-menu-item" data-action="play-pause-audio" title="${audioTitle}"><span class="menu-icon">${audioIcon}</span><span class="menu-text">Audio</span></div>`;
         }
+
+        // --- Add Sentence Selection Submenu if UI is visible ---
+        if (isSentenceSelectionUIVisible && sentenceElement) {
+            menuHTML += `<div class="contextual-menu-item contextual-menu-item-assign" data-action="assign-sentence-submenu">
+                            <span class="menu-icon">🎯</span>
+                            <span class="menu-text">Assign Sentence...</span>
+                            <span class="submenu-arrow">▶</span>
+                            <div class="contextual-submenu">
+                                <div class="contextual-menu-item" data-action="set-as-beginning" title="Set this sentence as the beginning">
+                                    <span class="menu-icon">🟢</span> <span class="menu-text">Set as Beginning</span>
+                                </div>
+                                <div class="contextual-menu-item" data-action="set-as-ending" title="Set this sentence as the ending">
+                                    <span class="menu-icon">🔴</span> <span class="menu-text">Set as Ending</span>
+                                </div>
+                            </div>
+                        </div>`;
+        }
+        // --- End Sentence Selection Submenu ---
+
         contextualMenu.innerHTML = menuHTML;
         const rect = sentenceElement.getBoundingClientRect();
         let menuTop = rect.bottom + window.scrollY + 5;
@@ -1627,8 +1669,58 @@ function displayWaveform(sentenceElement, audioBuffer, startTimeMs, endTimeMs) {
                     displayWaveform(highlightedSentence, audioBuffer, startTimeMs, endTimeMs);
                     break;
                 }
+                // --- Sentence Selection Actions ---
+                case 'set-as-beginning':
+                    if (highlightedSentence) {
+                        // Clear previous beginning sentence styling and reference
+                        if (beginningSentenceElement && beginningSentenceElement !== highlightedSentence) {
+                            beginningSentenceElement.classList.remove('selected-beginning-sentence');
+                        }
+                        // If this sentence was the ending sentence, clear that
+                        if (endingSentenceElement === highlightedSentence) {
+                            endingSentenceElement.classList.remove('selected-ending-sentence');
+                            endingSentenceElement = null;
+                            endingSentenceText = "";
+                            if (endingSentenceDisplay) endingSentenceDisplay.textContent = placeholderEnding;
+                        }
+
+                        beginningSentenceText = highlightedSentence.textContent.trim();
+                        beginningSentenceElement = highlightedSentence;
+                        if (beginningSentenceDisplay) beginningSentenceDisplay.textContent = beginningSentenceText;
+                        highlightedSentence.classList.add('selected-beginning-sentence');
+                        console.log("Beginning sentence set:", beginningSentenceText);
+                    }
+                    hideContextualMenu(); // Ensure menu hides after action
+                    break;
+                case 'set-as-ending':
+                    if (highlightedSentence) {
+                        // Clear previous ending sentence styling and reference
+                        if (endingSentenceElement && endingSentenceElement !== highlightedSentence) {
+                            endingSentenceElement.classList.remove('selected-ending-sentence');
+                        }
+                        // If this sentence was the beginning sentence, clear that
+                        if (beginningSentenceElement === highlightedSentence) {
+                            beginningSentenceElement.classList.remove('selected-beginning-sentence');
+                            beginningSentenceElement = null;
+                            beginningSentenceText = "";
+                            if (beginningSentenceDisplay) beginningSentenceDisplay.textContent = placeholderBeginning;
+                        }
+
+                        endingSentenceText = highlightedSentence.textContent.trim();
+                        endingSentenceElement = highlightedSentence;
+                        if (endingSentenceDisplay) endingSentenceDisplay.textContent = endingSentenceText;
+                        highlightedSentence.classList.add('selected-ending-sentence');
+                        console.log("Ending sentence set:", endingSentenceText);
+                    }
+                    hideContextualMenu(); // Ensure menu hides after action
+                    break;
+                // --- End Sentence Selection Actions ---
             }
-            hideContextualMenu();
+            // Do not hide contextual menu here if submenu was shown, CSS hover handles it.
+            // Only hide if it's not a submenu parent.
+            if (action !== 'assign-sentence-submenu') { // Check if it's not the parent of submenu
+                 hideContextualMenu();
+            }
         });
     }
     document.addEventListener('click', function(event) {

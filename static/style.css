@@ -176,3 +176,148 @@ h1, h2 {
     background-color: #e0e0e0;
     border-color: #bbb;
 }
+
+/* --- Sentence Selection UI Styles --- */
+#toggle-sentence-selection-btn {
+    background-color: #f0f0f0;
+    border: 1px solid #ccc;
+    padding: 5px 8px;
+    cursor: pointer;
+    vertical-align: middle; /* Or bottom, adjust as needed */
+    margin-left: 8px;
+    font-size: 1.2em; /* Adjust if '📝' is too small/large */
+    border-radius: 4px;
+}
+
+#toggle-sentence-selection-btn:hover {
+    background-color: #e0e0e0;
+    border-color: #bbb;
+}
+
+#sentence-selection-ui-container {
+    /* display: none; */ /* Default, will be toggled by JS. Keep it here for reference but main control is inline style for initial state. */
+    display: flex; /* This will be overridden by inline style 'display: none;' initially */
+    flex-direction: column;
+    border: 1px solid #ccc;
+    padding: 15px;
+    margin: 15px 0;
+    background-color: #f9f9f9;
+    border-radius: 4px;
+    box-shadow: 0 2px 4px rgba(0,0,0,0.05);
+}
+
+#sentence-selection-ui-container label {
+    font-weight: bold;
+    margin-bottom: 5px;
+    display: block;
+}
+
+.sentence-display-area {
+    background-color: #fff;
+    border: 1px solid #ddd;
+    padding: 10px;
+    min-height: 40px;
+    margin-bottom: 12px;
+    border-radius: 3px;
+    color: #555; /* For placeholder text */
+    font-style: italic; /* For placeholder text */
+    word-wrap: break-word; /* Ensures long text wraps */
+    line-height: 1.5;
+}
+
+#execute-sentence-task-btn {
+    padding: 10px 18px;
+    background-color: #007bff;
+    color: white;
+    border: none;
+    border-radius: 4px;
+    cursor: pointer;
+    margin-top: 5px;
+    font-size: 1em;
+    transition: background-color 0.2s ease-in-out;
+}
+
+#execute-sentence-task-btn:hover {
+    background-color: #0056b3;
+}
+
+/* --- Visual Distinction for Selected Sentences in Article --- */
+.selected-beginning-sentence {
+    background-color: #d4edda !important; /* Light green */
+    border-left: 3px solid #28a745 !important; /* Darker green */
+    padding-left: 5px; /* Add some padding so border doesn't stick to text */
+}
+
+.selected-ending-sentence {
+    background-color: #f8d7da !important; /* Light red */
+    border-left: 3px solid #dc3545 !important; /* Darker red */
+    padding-left: 5px; /* Add some padding so border doesn't stick to text */
+}
+
+/* --- Contextual Menu Submenu Styles --- */
+/* Ensure the main contextual menu item that triggers the submenu has position relative */
+.contextual-menu-item-assign {
+    position: relative;
+}
+
+.contextual-menu-item-assign .submenu-arrow {
+    margin-left: auto; /* Pushes arrow to the right */
+    font-size: 0.8em;
+    color: #666;
+    padding-left: 10px; /* Space between text and arrow */
+}
+
+.contextual-submenu {
+    display: none;
+    position: absolute;
+    left: 95%;  /* Adjust to make it appear slightly overlapping or next to based on padding/border */
+    top: -7px; /* Align top edge of submenu with parent item (adjust as needed with padding/border) */
+    background-color: #ffffff;
+    border: 1px solid #d1d1d1;
+    border-radius: 5px;
+    box-shadow: 0 3px 10px rgba(0,0,0,0.12);
+    z-index: 1002;
+    padding: 5px 0;
+    min-width: 180px;
+    list-style: none;
+}
+
+/* Show submenu on hover of the parent item */
+/* This relies on JS adding/removing 'hover' class or direct CSS hover */
+.contextual-menu-item-assign:hover > .contextual-submenu,
+.contextual-menu-item-assign.hover > .contextual-submenu {
+    display: block;
+}
+
+/* Styling for items within the submenu */
+.contextual-submenu .contextual-menu-item {
+    display: flex;
+    align-items: center;
+    padding: 9px 14px;
+    cursor: pointer;
+    font-size: 0.95em;
+    color: #333;
+    transition: background-color 0.15s ease-in-out, color 0.15s ease-in-out;
+    white-space: nowrap;
+}
+
+.contextual-submenu .contextual-menu-item:hover {
+    background-color: #f0f2f5;
+    color: #007bff;
+}
+
+.contextual-submenu .contextual-menu-item .menu-icon {
+    margin-right: 8px;
+    font-size: 1em; /* Ensure icon size is consistent */
+    line-height: 1;
+}
+
+/* Placeholder for styles copied from article.html <style> block if they are not global yet */
+/* It's better to move them to this global CSS file. For example: */
+/*
+#contextual-menu { ... }
+.contextual-menu-item { ... }
+.contextual-menu-item:hover { ... }
+.contextual-menu-item .menu-icon { ... }
+.contextual-menu-item .menu-text { ... }
+*/

@@ -281,6 +281,19 @@
     <h1>{{ article.filename }}
         <button id="restoreLocationButton" title="Restore Last Reading Position">🔖</button>
     </h1>
+
+    <div id="sentence-selection-ui-container" style="display: none;">
+        <div>
+            <label>Beginning Sentence:</label>
+            <div id="beginning-sentence-display" class="sentence-display-area">No beginning sentence selected.</div>
+        </div>
+        <div>
+            <label>Ending Sentence:</label>
+            <div id="ending-sentence-display" class="sentence-display-area">No ending sentence selected.</div>
+        </div>
+        <button id="execute-sentence-task-btn">Execute Task</button>
+        <p><small>Hint: Click the '📝' button to activate selection mode. Then, click on any sentence in the article to bring up a context menu. From the menu, choose 'Assign Sentence...' and then 'Set as Beginning' or 'Set as Ending'.</small></p>
+    </div>
     
     <button id="goToTopButton" title="Go to Top">⬆️</button> 
     <button id="goBackButton" title="Go Back to Highlighted Sentence">⬇️</button> 
@@ -301,6 +314,7 @@
     </script>
     {# --- END NEW --- #}
     <div id="gamepad-status-emoji" title="No Gamepad Connected">🎮</div>
+    <button id="toggle-sentence-selection-btn" title="Toggle Sentence Selection UI">📝</button>
 
 
     {% if article.mp3_parts_folder_path and article.num_audio_parts and article.num_audio_parts > 0 %}
