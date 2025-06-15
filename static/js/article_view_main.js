@@ -3,54 +3,14 @@
 // Depends on all other article_view_*.js files being loaded first, especially article_view_config.js.
 
 document.addEventListener('DOMContentLoaded', function() {
+    console.log("DEBUG_MAIN_DOMCONTENTLOADED_START: Checking sentenceSelectionUIContainer (direct access):", typeof sentenceSelectionUIContainer !== 'undefined' && !!sentenceSelectionUIContainer);
+    console.log("DEBUG_MAIN_DOMCONTENTLOADED_START: Checking window.sentenceSelectionUIContainer:", typeof window.sentenceSelectionUIContainer !== 'undefined' && !!window.sentenceSelectionUIContainer);
     // article_view_config.js should have already initialized global constants, DOM elements, and some state.
     // Functions from other modules will use these global variables (e.g., window.ARTICLE_ID, window.popup).
 
-    // --- Initialization Functions (Order can be important) ---
-
-    // 1. Populate sentence data (from sentences.js)
-    if (typeof populateSentenceElementsArray === 'function') {
-        populateSentenceElementsArray();
-    } else {
-        console.warn("JS_MAIN: populateSentenceElementsArray function not found.");
-    }
-
-    // 2. Initialize Sentence Selection UI specific displays (from sentence_selection.js)
-    if (typeof initializeSentenceSelectionDisplays === 'function') {
-        initializeSentenceSelectionDisplays();
-    } else {
-        console.warn("JS_MAIN: initializeSentenceSelectionDisplays function not found.");
-    }
-
-    // 3. Initialize Audio Context (from audio.js)
-    if (typeof initAudioContextGlobally === 'function') {
-        initAudioContextGlobally();
-    } else {
-        console.warn("JS_MAIN: initAudioContextGlobally function not found.");
-    }
-
-    // 4. Setup Gamepad (from gamepad.js - this also handles initial icon display)
-    if (typeof setupGamepadHandlers === 'function') {
-        setupGamepadHandlers();
-    } else {
-        console.warn("JS_MAIN: setupGamepadHandlers function not found.");
-        // Fallback for icon if main setup is missing
-        if(typeof updateGamepadIconDisplay === 'function') updateGamepadIconDisplay(false);
-    }
-
-
-    // --- Event Listeners Setup ---
-
-    // Setup Sentence Selection Event Listeners (from sentence_selection.js)
-    if (typeof setupSentenceSelectionEventListeners === 'function') {
-        setupSentenceSelectionEventListeners();
-    } else {
-        console.warn("JS_MAIN: setupSentenceSelectionEventListeners function not found.");
-    }
-
     // Article Content Interactions (Clicks, Context Menu)
-    if (window.articleContentWrapper) {
-        window.articleContentWrapper.addEventListener('contextmenu', function(event) {
+    if (articleContentWrapper) {
+        articleContentWrapper.addEventListener('contextmenu', function(event) {
             const targetSentence = event.target.closest('.english-sentence');
             if (targetSentence) {
                 event.preventDefault();
@@ -68,8 +28,10 @@ document.addEventListener('DOMContentLoaded', function() {
             }
         });
 
-        window.articleContentWrapper.addEventListener('click', function(event) {
+        articleContentWrapper.addEventListener('click', function(event) {
+            console.log("DEBUG_EVENT: Article content wrapper click listener triggered");
             const targetSentence = event.target.closest('.english-sentence');
+            console.log("DEBUG_EVENT: Target sentence found:", !!targetSentence, targetSentence);
             if (targetSentence) {
                 event.stopPropagation();
                 if (typeof hideTranslationPopup === 'function') hideTranslationPopup();
@@ -108,46 +70,113 @@ document.addEventListener('DOMContentLoaded', function() {
         });
     }
 
+    // --- Initialization Functions (Order can be important) ---
+
+    // 1. Populate sentence data (from sentences.js)
+    console.log("DEBUG_MAIN_BEFORE_POPULATE: sentenceSelectionUIContainer:", typeof sentenceSelectionUIContainer !== 'undefined' && !!sentenceSelectionUIContainer);
+    if (typeof populateSentenceElementsArray === 'function') {
+        populateSentenceElementsArray();
+    } else {
+        console.warn("JS_MAIN: populateSentenceElementsArray function not found.");
+    }
+    console.log("DEBUG_MAIN_AFTER_POPULATE: sentenceSelectionUIContainer:", typeof sentenceSelectionUIContainer !== 'undefined' && !!sentenceSelectionUIContainer);
+
+    // 2. Initialize Sentence Selection UI specific displays (from sentence_selection.js)
+    console.log("DEBUG_MAIN_BEFORE_INIT_SENT_DISPLAYS: sentenceSelectionUIContainer:", typeof sentenceSelectionUIContainer !== 'undefined' && !!sentenceSelectionUIContainer);
+    if (typeof initializeSentenceSelectionDisplays === 'function') {
+        initializeSentenceSelectionDisplays();
+    } else {
+        console.warn("JS_MAIN: initializeSentenceSelectionDisplays function not found.");
+    }
+    console.log("DEBUG_MAIN_AFTER_INIT_SENT_DISPLAYS: sentenceSelectionUIContainer:", typeof sentenceSelectionUIContainer !== 'undefined' && !!sentenceSelectionUIContainer);
+
+    // 3. Initialize Audio Context (from audio.js)
+    console.log("DEBUG_MAIN_BEFORE_INIT_AUDIO: sentenceSelectionUIContainer:", typeof sentenceSelectionUIContainer !== 'undefined' && !!sentenceSelectionUIContainer);
+    if (typeof initAudioContextGlobally === 'function') {
+        initAudioContextGlobally();
+    } else {
+        console.warn("JS_MAIN: initAudioContextGlobally function not found.");
+    }
+    console.log("DEBUG_MAIN_AFTER_INIT_AUDIO: sentenceSelectionUIContainer:", typeof sentenceSelectionUIContainer !== 'undefined' && !!sentenceSelectionUIContainer);
+
+    // 4. Setup Gamepad (from gamepad.js - this also handles initial icon display)
+    console.log("DEBUG_MAIN_BEFORE_SETUP_GAMEPAD: sentenceSelectionUIContainer:", typeof sentenceSelectionUIContainer !== 'undefined' && !!sentenceSelectionUIContainer);
+    if (typeof setupGamepadHandlers === 'function') {
+        setupGamepadHandlers();
+    } else {
+        console.warn("JS_MAIN: setupGamepadHandlers function not found.");
+        // Fallback for icon if main setup is missing
+        if(typeof updateGamepadIconDisplay === 'function') updateGamepadIconDisplay(false);
+    }
+    console.log("DEBUG_MAIN_AFTER_SETUP_GAMEPAD: sentenceSelectionUIContainer:", typeof sentenceSelectionUIContainer !== 'undefined' && !!sentenceSelectionUIContainer);
+
+
+    // --- Event Listeners Setup ---
+
+    // Setup Sentence Selection Event Listeners (from sentence_selection.js)
+    console.log("DEBUG_MAIN_BEFORE_SETUP_SENT_EVENTS: sentenceSelectionUIContainer:", typeof sentenceSelectionUIContainer !== 'undefined' && !!sentenceSelectionUIContainer);
+    if (typeof setupSentenceSelectionEventListeners === 'function') {
+        setupSentenceSelectionEventListeners();
+    } else {
+        console.warn("JS_MAIN: setupSentenceSelectionEventListeners function not found.");
+    }
+    console.log("DEBUG_MAIN_AFTER_SETUP_SENT_EVENTS: sentenceSelectionUIContainer:", typeof sentenceSelectionUIContainer !== 'undefined' && !!sentenceSelectionUIContainer);
+
     // Contextual Menu Actions
-    if (window.contextualMenu) {
-        window.contextualMenu.addEventListener('click', function(event) {
+    if (contextualMenu) { // Ensure direct access for contextualMenu itself
+        contextualMenu.addEventListener('click', function(event) {
             event.stopPropagation();
+            console.log("DEBUG_CONTEXT_ACTION: Context menu item clicked. Event target:", event.target);
             const actionTarget = event.target.closest('.contextual-menu-item');
-            if (!actionTarget || !window.highlightedSentence) {
+            console.log("DEBUG_CONTEXT_ACTION: actionTarget:", actionTarget);
+
+            if (!actionTarget || !highlightedSentence) { // Direct access for highlightedSentence
                 if (typeof hideContextualMenu === 'function') hideContextualMenu();
                 return;
             }
+            // Log details if highlightedSentence is valid
+            console.log("DEBUG_CONTEXT_ACTION: highlightedSentence valid:", !!highlightedSentence);
+            if(highlightedSentence) {
+                console.log("DEBUG_CONTEXT_ACTION: highlightedSentence translation:", highlightedSentence.dataset.translation);
+                console.log("DEBUG_CONTEXT_ACTION: highlightedSentence pIndex:", highlightedSentence.dataset.paragraphIndex, "sIndex:", highlightedSentence.dataset.sentenceIndex);
+            }
+
             const action = actionTarget.dataset.action;
+            console.log("DEBUG_CONTEXT_ACTION: Action:", action);
 
             switch (action) {
                 case 'show-translation':
-                    const translation = window.highlightedSentence.dataset.translation;
-                    if (typeof displayPopup === 'function') displayPopup(window.highlightedSentence, translation || "No translation available.");
+                    const translation = highlightedSentence.dataset.translation; // Direct access
+                    console.log("DEBUG_CONTEXT_ACTION: Calling displayPopup with target:", highlightedSentence, "and translation:", (highlightedSentence ? highlightedSentence.dataset.translation : "N/A"));
+                    if (typeof displayPopup === 'function') displayPopup(highlightedSentence, translation || "No translation available."); // Direct access
                     break;
                 case 'save-location':
-                    if (typeof saveCurrentLocation === 'function') saveCurrentLocation(parseInt(window.highlightedSentence.dataset.paragraphIndex), parseInt(window.highlightedSentence.dataset.sentenceIndex), "manual_menu_save");
+                    console.log("DEBUG_CONTEXT_ACTION: Calling saveCurrentLocation with pIndex:", (highlightedSentence ? highlightedSentence.dataset.paragraphIndex : "N/A"), "sIndex:", (highlightedSentence ? highlightedSentence.dataset.sentenceIndex : "N/A"));
+                    if (typeof saveCurrentLocation === 'function') saveCurrentLocation(parseInt(highlightedSentence.dataset.paragraphIndex), parseInt(highlightedSentence.dataset.sentenceIndex), "manual_menu_save"); // Direct access
                     break;
                 case 'play-pause-audio':
                     // This action might be better handled by a dedicated function in audio.js if it gets complex
                     if (typeof initAudioContextGlobally === 'function') initAudioContextGlobally(); // Ensure context
                     let playAsPart = false;
                     let canPlayThis = false;
-                    if (window.isAudiobookModeFull && window.audioContext && window.audioBuffer && window.HAS_TIMESTAMPS) {
+                    // Direct access for isAudiobookModeFull, audioContext, audioBuffer, HAS_TIMESTAMPS, isAudiobookModeParts, currentLoadedAudioPartIndex
+                    if (isAudiobookModeFull && audioContext && audioBuffer && HAS_TIMESTAMPS) {
                         canPlayThis = true; playAsPart = false;
-                    } else if (window.isAudiobookModeParts && window.audioContext && window.audioBuffer && window.HAS_TIMESTAMPS && window.currentLoadedAudioPartIndex !== -1) {
-                        const sentencePartIndex = parseInt(window.highlightedSentence.dataset.audioPartIndex, 10);
-                        if (sentencePartIndex === window.currentLoadedAudioPartIndex) {
+                    } else if (isAudiobookModeParts && audioContext && audioBuffer && HAS_TIMESTAMPS && currentLoadedAudioPartIndex !== -1) {
+                        const sentencePartIndex = parseInt(highlightedSentence.dataset.audioPartIndex, 10); // Direct access
+                        if (sentencePartIndex === currentLoadedAudioPartIndex) { // Direct access
                             canPlayThis = true; playAsPart = true;
                         }
                     }
                     if (canPlayThis) {
                         const iconSpan = actionTarget.querySelector('.menu-icon');
-                        if (window.currentPlayingSentence === window.highlightedSentence && window.currentSourceNode) {
+                        // Direct access for currentPlayingSentence, highlightedSentence, currentSourceNode
+                        if (currentPlayingSentence === highlightedSentence && currentSourceNode) {
                             if (typeof stopCurrentAudio === 'function') stopCurrentAudio();
                             if (iconSpan) iconSpan.textContent = "▶️";
                             if (actionTarget) actionTarget.title = "Play Sentence Audio";
                         } else {
-                            if (typeof playSentenceAudio === 'function') playSentenceAudio(window.highlightedSentence, playAsPart);
+                            if (typeof playSentenceAudio === 'function') playSentenceAudio(highlightedSentence, playAsPart); // Direct access
                             if (iconSpan) iconSpan.textContent = "⏹️";
                             if (actionTarget) actionTarget.title = "Stop Sentence Audio";
                         }
@@ -158,15 +187,16 @@ document.addEventListener('DOMContentLoaded', function() {
                 case 'edit-audio-clip':
                      // This action would call a function from waveform.js
                     if (typeof handleEditAudioClipContextMenu === 'function') handleEditAudioClipContextMenu();
-                    else if (typeof displayWaveform === 'function' && typeof clearExistingWaveform === 'function' && window.highlightedSentence) { // Fallback to direct calls if specific handler not found
-                        let waveformIsCurrentlyVisible = window.highlightedSentence.parentElement?.nextElementSibling?.classList.contains('waveform-scroll-container');
+                    // Direct access for highlightedSentence and audioBuffer
+                    else if (typeof displayWaveform === 'function' && typeof clearExistingWaveform === 'function' && highlightedSentence) {
+                        let waveformIsCurrentlyVisible = highlightedSentence.parentElement?.nextElementSibling?.classList.contains('waveform-scroll-container'); // Direct access
                         if (waveformIsCurrentlyVisible) {
-                            clearExistingWaveform(window.highlightedSentence);
+                            clearExistingWaveform(highlightedSentence); // Direct access
                         } else {
-                            const startTimeMs = parseInt(window.highlightedSentence.dataset.startTimeMs, 10);
-                            const endTimeMs = parseInt(window.highlightedSentence.dataset.endTimeMs, 10);
-                            if (!isNaN(startTimeMs) && !isNaN(endTimeMs) && window.audioBuffer) { // Ensure audioBuffer is the full one
-                                displayWaveform(window.highlightedSentence, window.audioBuffer, startTimeMs, endTimeMs);
+                            const startTimeMs = parseInt(highlightedSentence.dataset.startTimeMs, 10); // Direct access
+                            const endTimeMs = parseInt(highlightedSentence.dataset.endTimeMs, 10); // Direct access
+                            if (!isNaN(startTimeMs) && !isNaN(endTimeMs) && audioBuffer) { // Direct access for audioBuffer
+                                displayWaveform(highlightedSentence, audioBuffer, startTimeMs, endTimeMs); // Direct access
                             } else {
                                 alert("Cannot display waveform: Time data missing or full audio not loaded.");
                             }
@@ -176,11 +206,11 @@ document.addEventListener('DOMContentLoaded', function() {
                     }
                     break;
                 case 'set-as-beginning':
-                    if (typeof handleSetAsBeginning === 'function') handleSetAsBeginning(window.highlightedSentence);
+                    if (typeof handleSetAsBeginning === 'function') handleSetAsBeginning(highlightedSentence); // Direct access
                     else console.warn("JS_MAIN: ContextMenu - handleSetAsBeginning function not found.");
                     break;
                 case 'set-as-ending':
-                    if (typeof handleSetAsEnding === 'function') handleSetAsEnding(window.highlightedSentence);
+                    if (typeof handleSetAsEnding === 'function') handleSetAsEnding(highlightedSentence); // Direct access
                     else console.warn("JS_MAIN: ContextMenu - handleSetAsEnding function not found.");
                     break;
             }
@@ -192,11 +222,19 @@ document.addEventListener('DOMContentLoaded', function() {
 
     // Global Click Listener (for hiding popups)
     document.addEventListener('click', function(event) {
-        if (window.contextualMenu && window.contextualMenu.style.display === 'block' && !window.contextualMenu.contains(event.target) && !event.target.closest('.english-sentence')) {
+        console.log("DEBUG_GLOBAL_CLICK_HIDE_MENU: Checking conditions to hide context menu:");
+        console.log("DEBUG_GLOBAL_CLICK_HIDE_MENU: contextualMenu exists:", !!contextualMenu);
+        if (contextualMenu) { // Only log style if contextualMenu itself exists
+            console.log("DEBUG_GLOBAL_CLICK_HIDE_MENU: contextualMenu.style.display === 'block':", contextualMenu.style.display === 'block');
+            console.log("DEBUG_GLOBAL_CLICK_HIDE_MENU: !contextualMenu.contains(event.target):", !contextualMenu.contains(event.target), "event.target:", event.target);
+        }
+        console.log("DEBUG_GLOBAL_CLICK_HIDE_MENU: !event.target.closest('.english-sentence'):", !event.target.closest('.english-sentence'), "closest sentence:", event.target.closest('.english-sentence'));
+        if (contextualMenu && contextualMenu.style.display === 'block' && !contextualMenu.contains(event.target) && !event.target.closest('.english-sentence')) {
             if (typeof hideContextualMenu === 'function') hideContextualMenu();
         }
+        // For the popup hiding logic, also ensure contextualMenu is accessed directly
         if (window.popup && window.popup.style.display === 'block' && !window.popup.contains(event.target) && !event.target.closest('.english-sentence') &&
-            !(window.contextualMenu && window.contextualMenu.style.display === 'block' && window.contextualMenu.contains(event.target))) {
+            !(contextualMenu && contextualMenu.style.display === 'block' && contextualMenu.contains(event.target))) {
             if (typeof hideTranslationPopup === 'function') hideTranslationPopup();
         }
     });

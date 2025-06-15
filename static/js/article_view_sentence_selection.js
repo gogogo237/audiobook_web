@@ -70,37 +70,40 @@ function handleSetAsEnding(sentenceElement) {
 
 
 function setupSentenceSelectionEventListeners() {
+    console.log("DEBUG_SETUP: In setupSentenceSelectionEventListeners. Checking sentenceSelectionUIContainer (direct access):", typeof sentenceSelectionUIContainer !== 'undefined' && !!sentenceSelectionUIContainer);
     // Uses global DOM elements from config.js
     // Uses global state: isSentenceSelectionUIVisible, beginningSentenceElement, endingSentenceElement, ARTICLE_ID, sentenceElementsArray
     // Calls functions from this file or other modules (getAdjacentSentence, fetchSentenceDbIdByIndices)
 
-    if (window.toggleSentenceSelectionBtn && window.sentenceSelectionUIContainer) {
-        window.toggleSentenceSelectionBtn.addEventListener('click', () => {
-            window.isSentenceSelectionUIVisible = !window.isSentenceSelectionUIVisible;
-            if (window.isSentenceSelectionUIVisible) {
-                window.sentenceSelectionUIContainer.style.display = 'flex';
+    if (toggleSentenceSelectionBtn && sentenceSelectionUIContainer) {
+        toggleSentenceSelectionBtn.addEventListener('click', () => {
+            console.log("DEBUG_EVENT: Toggle button listener triggered");
+            isSentenceSelectionUIVisible = !isSentenceSelectionUIVisible;
+            if (isSentenceSelectionUIVisible) {
+                sentenceSelectionUIContainer.style.display = 'flex';
                 setTimeout(() => {
-                    window.sentenceSelectionUIContainer.style.transform = 'scale(1)';
-                    window.sentenceSelectionUIContainer.style.opacity = '1';
-                    window.sentenceSelectionUIContainer.style.pointerEvents = 'auto';
+                    sentenceSelectionUIContainer.style.transform = 'scale(1)';
+                    sentenceSelectionUIContainer.style.opacity = '1';
+                    sentenceSelectionUIContainer.style.pointerEvents = 'auto';
                 }, 10);
-                window.toggleSentenceSelectionBtn.textContent = '✅';
-                window.toggleSentenceSelectionBtn.title = 'Hide Sentence Actions Panel';
+                toggleSentenceSelectionBtn.textContent = '✅';
+                toggleSentenceSelectionBtn.title = 'Hide Sentence Actions Panel';
             } else {
-                window.sentenceSelectionUIContainer.style.transform = 'scale(0.8)';
-                window.sentenceSelectionUIContainer.style.opacity = '0';
-                window.sentenceSelectionUIContainer.style.pointerEvents = 'none';
+                sentenceSelectionUIContainer.style.transform = 'scale(0.8)';
+                sentenceSelectionUIContainer.style.opacity = '0';
+                sentenceSelectionUIContainer.style.pointerEvents = 'none';
                 setTimeout(() => {
-                    window.sentenceSelectionUIContainer.style.display = 'none';
+                    sentenceSelectionUIContainer.style.display = 'none';
                 }, 200);
-                window.toggleSentenceSelectionBtn.textContent = '⚙️';
-                window.toggleSentenceSelectionBtn.title = 'Open/Close Sentence Actions Panel';
+                toggleSentenceSelectionBtn.textContent = '⚙️';
+                toggleSentenceSelectionBtn.title = 'Open/Close Sentence Actions Panel';
             }
         });
     }
 
-    if (window.distributeTimestampsBtn) {
-        window.distributeTimestampsBtn.addEventListener('click', async () => {
+    console.log("DEBUG_SETUP: Checking distributeTimestampsBtn (direct access):", typeof distributeTimestampsBtn !== 'undefined' && !!distributeTimestampsBtn);
+    if (distributeTimestampsBtn) {
+        distributeTimestampsBtn.addEventListener('click', async () => {
             if (!window.beginningSentenceElement || !window.endingSentenceElement) {
                 alert("Please select both a beginning and an ending sentence."); return;
             }
@@ -143,8 +146,8 @@ function setupSentenceSelectionEventListeners() {
             const durationPerSentence = totalDurationForBlock / sentencesInBlock.length;
             let currentProcessingStartTimeMs = segmentStartTimeMs;
             let timestampUpdatesForBackend = [];
-            window.distributeTimestampsBtn.disabled = true;
-            window.distributeTimestampsBtn.textContent = "Processing...";
+            distributeTimestampsBtn.disabled = true;
+            distributeTimestampsBtn.textContent = "Processing...";
 
             try {
                 for (const sentenceElement of sentencesInBlock) {
@@ -180,14 +183,17 @@ function setupSentenceSelectionEventListeners() {
             } catch (error) {
                 console.error("Error in distributeTimestampsBtn handler:", error); alert("An unexpected error occurred: " + error.message);
             } finally {
-                window.distributeTimestampsBtn.disabled = false; window.distributeTimestampsBtn.textContent = "Distribute Ending Sentence Time";
+                distributeTimestampsBtn.disabled = false; distributeTimestampsBtn.textContent = "Distribute Ending Sentence Time";
             }
             // --- End of distributeTimestampsBtn logic ---
         });
+    } else {
+        console.warn("DEBUG_SETUP: distributeTimestampsBtn is null or undefined, listener not attached.");
     }
 
-    if (window.executeSentenceTaskBtn) {
-        window.executeSentenceTaskBtn.addEventListener('click', async () => {
+    console.log("DEBUG_SETUP: Checking executeSentenceTaskBtn (direct access):", typeof executeSentenceTaskBtn !== 'undefined' && !!executeSentenceTaskBtn);
+    if (executeSentenceTaskBtn) {
+        executeSentenceTaskBtn.addEventListener('click', async () => {
             if (!window.beginningSentenceElement || !window.endingSentenceElement) {
                 alert("Please select both a beginning and an ending sentence."); return;
             }
@@ -204,8 +210,8 @@ function setupSentenceSelectionEventListeners() {
             if (segmentStartTimeMs >= segmentEndTimeMs) { alert("Beginning sentence must come before ending sentence."); return; }
             if (!window.ARTICLE_ID) { alert("Article ID missing."); return; }
 
-            window.executeSentenceTaskBtn.disabled = true;
-            window.executeSentenceTaskBtn.textContent = "Processing...";
+            executeSentenceTaskBtn.disabled = true;
+            executeSentenceTaskBtn.textContent = "Processing...";
             try {
                 const sentenceDataForBackend = [];
                 let currentIterSentence = window.beginningSentenceElement;
@@ -250,9 +256,11 @@ function setupSentenceSelectionEventListeners() {
             } catch (error) {
                 console.error('Error executing task:', error); alert(`Error: ${error.message}`);
             } finally {
-                window.executeSentenceTaskBtn.disabled = false; window.executeSentenceTaskBtn.textContent = "Update Timestamps for Selection";
+                executeSentenceTaskBtn.disabled = false; executeSentenceTaskBtn.textContent = "Update Timestamps for Selection";
             }
             // --- End of executeSentenceTaskBtn logic ---
         });
+    } else {
+        console.warn("DEBUG_SETUP: executeSentenceTaskBtn is null or undefined, listener not attached.");
     }
 }

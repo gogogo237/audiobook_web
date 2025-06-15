@@ -146,13 +146,14 @@ function findSentenceElement(pIndex, sIndex) {
 }
 
 async function saveCurrentLocation(pIndex, sIndex, source = "unknown") {
+    console.log("DEBUG_SENTENCES_SAVE: saveCurrentLocation called. ARTICLE_ID:", ARTICLE_ID, "pIndex:", pIndex, "sIndex:", sIndex, "Source:", source);
     // Uses global: ARTICLE_ID (from config.js)
-    if (window.ARTICLE_ID === null || pIndex === undefined || sIndex === undefined) {
-        console.warn("JS_SENTENCES: saveCurrentLocation called with invalid data.", { ARTICLE_ID: window.ARTICLE_ID, pIndex, sIndex });
+    if (ARTICLE_ID === null || pIndex === undefined || sIndex === undefined) {
+        console.warn("JS_SENTENCES: saveCurrentLocation called with invalid data.", { ARTICLE_ID: ARTICLE_ID, pIndex, sIndex });
         return;
     }
     try {
-        const response = await fetch(`/article/${window.ARTICLE_ID}/save_location`, {
+        const response = await fetch(`/article/${ARTICLE_ID}/save_location`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ paragraph_index: pIndex, sentence_index_in_paragraph: sIndex })

@@ -98,7 +98,8 @@ function populateAndShowContextualMenu(sentenceElement, clickX) {
 
     // The 'edit-audio-clip' option should be available if full audio mode is on and buffer exists.
     // The text/icon changes based on whether the waveform for *this* sentence is currently visible.
-    if (isAudiobookModeFull && window.audioBuffer && sentenceElement) { // window.audioBuffer for global audioBuffer
+    console.log("DEBUG_CONTEXT_MENU: 'Edit Clip' check: isAudiobookModeFull:", typeof isAudiobookModeFull !== 'undefined' && isAudiobookModeFull, "audioBuffer exists:", !!audioBuffer, "sentenceElement exists:", !!sentenceElement);
+    if (isAudiobookModeFull && audioBuffer && sentenceElement) { // audioBuffer for global audioBuffer
         let editActionText = "Edit Clip";
         let editActionIcon = "✏️";
         if (waveformIsVisible) {
@@ -108,8 +109,12 @@ function populateAndShowContextualMenu(sentenceElement, clickX) {
         menuHTML += `<div class="contextual-menu-item" data-action="edit-audio-clip" title="${editActionText} for this sentence"><span class="menu-icon">${editActionIcon}</span><span class="menu-text">${editActionText}</span></div>`;
     }
 
-    const canPlayAudio = (isAudiobookModeFull && window.audioContext && window.audioBuffer && HAS_TIMESTAMPS) ||
-                         (isAudiobookModeParts && window.audioContext && window.audioBuffer && HAS_TIMESTAMPS && currentLoadedAudioPartIndex !== -1 &&
+    console.log("DEBUG_CONTEXT_MENU: 'Play/Pause Audio' check: isAudiobookModeFull:", typeof isAudiobookModeFull !== 'undefined' && isAudiobookModeFull, "isAudiobookModeParts:", typeof isAudiobookModeParts !== 'undefined' && isAudiobookModeParts, "audioContext exists:", !!audioContext, "audioBuffer exists:", !!audioBuffer, "HAS_TIMESTAMPS:", typeof HAS_TIMESTAMPS !== 'undefined' && HAS_TIMESTAMPS);
+    if (typeof isAudiobookModeParts !== 'undefined' && isAudiobookModeParts) {
+        console.log("DEBUG_CONTEXT_MENU: 'Play/Pause Audio' (Parts detail): currentLoadedAudioPartIndex:", typeof currentLoadedAudioPartIndex !== 'undefined' ? currentLoadedAudioPartIndex : 'undefined', "sentence part index:", sentenceElement ? sentenceElement.dataset.audioPartIndex : 'N/A');
+    }
+    const canPlayAudio = (isAudiobookModeFull && audioContext && audioBuffer && HAS_TIMESTAMPS) ||
+                         (isAudiobookModeParts && audioContext && audioBuffer && HAS_TIMESTAMPS && currentLoadedAudioPartIndex !== -1 &&
                           sentenceElement.dataset.audioPartIndex !== undefined && parseInt(sentenceElement.dataset.audioPartIndex, 10) === currentLoadedAudioPartIndex);
 
     if (canPlayAudio) {
@@ -124,7 +129,8 @@ function populateAndShowContextualMenu(sentenceElement, clickX) {
 
     // Sentence Selection Submenu
     // isSentenceSelectionUIVisible needs to be globally accessible (e.g., from config or main)
-    if (window.isSentenceSelectionUIVisible && sentenceElement) {
+    console.log("DEBUG_CONTEXT_MENU: 'Assign Sentence' check: isSentenceSelectionUIVisible:", typeof isSentenceSelectionUIVisible !== 'undefined' && isSentenceSelectionUIVisible, "sentenceElement exists:", !!sentenceElement);
+    if (isSentenceSelectionUIVisible && sentenceElement) {
         menuHTML += `<div class="contextual-menu-item contextual-menu-item-assign" data-action="assign-sentence-submenu">
                         <span class="menu-icon">🎯</span>
                         <span class="menu-text">Assign Sentence...</span>

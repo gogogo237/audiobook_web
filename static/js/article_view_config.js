@@ -24,9 +24,11 @@ if (articleDataElement) {
         convertedMp3Path: null, mp3PartsFolderPath: null
     };
 }
+console.log("CONFIG_DEBUG: Raw articleData:", articleData);
 
 // --- Global Constants ---
 const ARTICLE_ID = articleData.articleId;
+console.log("CONFIG_DEBUG: ARTICLE_ID initialized as:", ARTICLE_ID);
 const HAS_TIMESTAMPS = articleData.hasTimestamps;
 const NUM_AUDIO_PARTS = parseInt(articleData.numAudioParts, 10) || 0;
 const INITIAL_READING_LOCATION = articleData.initialReadingLocation;
@@ -51,13 +53,16 @@ const gamepadStatusEmoji = document.getElementById('gamepad-status-emoji');
 const toggleSentenceSelectionBtn = document.getElementById('toggle-sentence-selection-btn');
 console.log("CONFIG_DEBUG: toggleSentenceSelectionBtn found:", !!toggleSentenceSelectionBtn);
 const sentenceSelectionUIContainer = document.getElementById('sentence-selection-ui-container');
+console.log("CONFIG_DEBUG: sentenceSelectionUIContainer found:", !!sentenceSelectionUIContainer);
 const beginningSentenceDisplay = document.getElementById('beginning-sentence-display');
 const endingSentenceDisplay = document.getElementById('ending-sentence-display');
 const executeSentenceTaskBtn = document.getElementById('execute-sentence-task-btn');
 if (executeSentenceTaskBtn) {
     executeSentenceTaskBtn.textContent = "Update Timestamps for Selection";
 }
+console.log("CONFIG_DEBUG: executeSentenceTaskBtn found:", !!executeSentenceTaskBtn);
 const distributeTimestampsBtn = document.getElementById('distribute-timestamps-btn');
+console.log("CONFIG_DEBUG: distributeTimestampsBtn found:", !!distributeTimestampsBtn);
 
 // --- Audiobook Mode UI Elements ---
 const toggleAudiobookModeButton = document.getElementById('toggleAudiobookMode');
