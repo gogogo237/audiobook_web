@@ -2,8 +2,11 @@ import os
 import tempfile
 import shutil
 from pathlib import Path
-from flask import Flask, render_template, request, redirect, url_for, flash, jsonify, send_from_directory, after_this_request, send_file
+from flask import Flask, render_template, request, redirect, url_for, flash, jsonify, send_from_directory, after_this_request, send_file, current_app
 from werkzeug.utils import secure_filename
+import io
+import zipfile
+from pydub import AudioSegment
 import db_manager
 import text_parser
 import audio_processor
@@ -923,6 +926,85 @@ def serve_mp3_part(article_id, part_index):
 
     return send_from_directory(str(parts_folder.resolve()), part_filename, 
                                as_attachment=should_download, download_name=download_name if should_download else None)
+
+
+@app.route('/article/<int:article_id>/execute_task', methods=['POST'])
+def execute_task_for_article(article_id):
+    try:
+        data = request.get_json()
+        if not data:
+            return jsonify({"message": "Invalid request: No JSON data received."}), 400
+
+        start_time_ms = data.get('start_time_ms')
+        end_time_ms = data.get('end_time_ms')
+        sentence_texts = data.get('sentence_texts')
+
+        if start_time_ms is None or end_time_ms is None or sentence_texts is None:
+            return jsonify({"message": "Invalid request: Missing start_time_ms, end_time_ms, or sentence_texts."}), 400
+
+        if not isinstance(start_time_ms, int) or not isinstance(end_time_ms, int) or start_time_ms >= end_time_ms:
+            return jsonify({"message": "Invalid timestamps."}), 400
+
+        if not isinstance(sentence_texts, list) or not sentence_texts:
+            return jsonify({"message": "Sentence texts must be a non-empty list."}), 400
+
+        article = db_manager.get_article_by_id(article_id, app_logger=current_app.logger)
+        if not article:
+            return jsonify({"message": "Article not found."}), 404
+
+        if not article['converted_mp3_path']: # Dictionary access
+            return jsonify({"message": "Article does not have a converted MP3 audio file."}), 400
+
+        upload_folder = current_app.config.get('UPLOAD_FOLDER', 'uploads')
+        full_audio_path = os.path.join(upload_folder, article['converted_mp3_path']) # Dictionary access
+
+        if not os.path.exists(full_audio_path):
+            current_app.logger.error(f"Audio file not found at path: {full_audio_path}")
+            return jsonify({"message": f"Full audio file not found on server. Expected at: {article['converted_mp3_path']}"}), 500 # Dictionary access
+
+        base_filename = "".join(c if c.isalnum() or c in ('.', '_') else '_' for c in article['filename']) # Dictionary access
+        txt_filename = f"partof_{base_filename}.txt"
+        pcm_filename = f"partof_{base_filename}.pcm"
+        zip_filename = f"partof_{base_filename}.zip"
+
+        text_content = "\n".join(sentence_texts) # Corrected newline usage
+
+        try:
+            current_app.logger.info(f"Loading audio from: {full_audio_path}")
+            audio = AudioSegment.from_file(full_audio_path)
+            current_app.logger.info(f"Audio loaded. Duration: {len(audio)}ms, Channels: {audio.channels}, Frame Rate: {audio.frame_rate}, Sample Width: {audio.sample_width} bytes")
+
+            audio_segment = audio[start_time_ms:end_time_ms]
+            current_app.logger.info(f"Audio segment sliced: {len(audio_segment)}ms")
+
+            if audio_segment.sample_width != 2:
+                 current_app.logger.info(f"Original sample width is {audio_segment.sample_width} bytes. Converting to 16-bit (2 bytes).")
+                 audio_segment = audio_segment.set_sample_width(2)
+
+            pcm_data = audio_segment.raw_data
+            current_app.logger.info(f"PCM data extracted: {len(pcm_data)} bytes. Expected format: 16-bit, {audio_segment.frame_rate}Hz, {audio_segment.channels}ch")
+
+        except Exception as e:
+            current_app.logger.error(f"Error processing audio for article {article_id}: {e}", exc_info=True)
+            return jsonify({"message": f"Error processing audio: {str(e)}"}), 500
+
+        zip_buffer = io.BytesIO()
+        with zipfile.ZipFile(zip_buffer, "w", zipfile.ZIP_DEFLATED) as zf:
+            zf.writestr(txt_filename, text_content.encode('utf-8'))
+            zf.writestr(pcm_filename, pcm_data)
+
+        zip_buffer.seek(0)
+
+        return send_file(
+            zip_buffer,
+            as_attachment=True,
+            download_name=zip_filename,
+            mimetype='application/zip'
+        )
+
+    except Exception as e:
+        current_app.logger.error(f"Error in execute_task_for_article for article_id {article_id}: {e}", exc_info=True)
+        return jsonify({"message": f"An unexpected error occurred: {str(e)}"}), 500
 
 
 if __name__ == '__main__':

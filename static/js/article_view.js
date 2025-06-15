@@ -1554,16 +1554,126 @@ function displayWaveform(sentenceElement, audioBuffer, startTimeMs, endTimeMs) {
 
     if (executeSentenceTaskBtn) {
         executeSentenceTaskBtn.addEventListener('click', () => {
-            if (!beginningSentenceText && !endingSentenceText) {
-                alert("Please select a beginning and/or an ending sentence first.");
-            } else {
-                // For now, just an alert. Later this will trigger a backend call.
-                alert("Task Execution:\n\nBeginning: " + (beginningSentenceText || "None") + "\n\nEnding: " + (endingSentenceText || "None"));
-                // Example of how to get sentence IDs if needed:
-                // const beginningId = beginningSentenceElement ? beginningSentenceElement.dataset.sentenceDbId : null;
-                // const endingId = endingSentenceElement ? endingSentenceElement.dataset.sentenceDbId : null;
-                // console.log("Begin ID:", beginningId, "End ID:", endingId);
+            // 1. Validation Checks
+            if (!beginningSentenceElement || !endingSentenceElement) {
+                alert("Please select both a beginning and an ending sentence.");
+                return;
             }
+
+            const startTimeMs = parseInt(beginningSentenceElement.dataset.startTimeMs, 10);
+            const endTimeMs = parseInt(endingSentenceElement.dataset.endTimeMs, 10);
+
+            if (isNaN(startTimeMs) || isNaN(endTimeMs)) {
+                alert("Selected sentences are missing timestamp data. Ensure they have 'data-start-time-ms' and 'data-end-time-ms' attributes.");
+                return;
+            }
+
+            if (startTimeMs >= endTimeMs) {
+                alert("Beginning sentence must come before the ending sentence (based on timestamps).");
+                return;
+            }
+
+            // audioBuffer is the global variable for the full decoded audio track
+            if (!audioBuffer) {
+                alert("Full audio track is not loaded. Please load the audio in 'Audiobook Mode (Full Audio)' first.");
+                return;
+            }
+
+            // Ensure articleData and articleData.articleId are available
+            if (!articleData || !articleData.articleId) {
+                alert("Article ID is missing. Cannot proceed.");
+                return;
+            }
+
+            // 2. Collect Sentence Texts
+            const textsToExtract = [];
+            let currentIterSentence = beginningSentenceElement;
+            let foundEndingElement = false;
+            let iterSafetyCounter = 0;
+            const maxPossibleSentences = sentenceElementsArray.length;
+
+            while (currentIterSentence) {
+                textsToExtract.push(currentIterSentence.textContent.trim());
+                if (currentIterSentence === endingSentenceElement) {
+                    foundEndingElement = true;
+                    break;
+                }
+                currentIterSentence = getAdjacentSentence(currentIterSentence, 'next');
+
+                iterSafetyCounter++;
+                if (iterSafetyCounter > maxPossibleSentences) {
+                    console.error("Error collecting sentences: Loop exceeded maximum sentence count.");
+                    alert("An error occurred while collecting sentences: safety limit exceeded. Check console for details.");
+                    return;
+                }
+            }
+
+            if (!foundEndingElement) {
+                console.error("Error collecting sentences: The selected ending sentence was not found by iterating from the beginning sentence.");
+                alert("Could not find the selected ending sentence. Please ensure it appears after the beginning sentence in the article text.");
+                return;
+            }
+
+            // 3. API Request
+            const payload = {
+                start_time_ms: startTimeMs,
+                end_time_ms: endTimeMs,
+                sentence_texts: textsToExtract
+            };
+
+            executeSentenceTaskBtn.disabled = true;
+            executeSentenceTaskBtn.textContent = "Processing...";
+
+            fetch(`/article/${articleData.articleId}/execute_task`, {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                },
+                body: JSON.stringify(payload)
+            })
+            .then(response => {
+                if (!response.ok) {
+                    return response.json().then(errData => {
+                        throw new Error(errData.message || `Server error: ${response.status}`);
+                    }).catch(() => {
+                        throw new Error(`Server error: ${response.status} ${response.statusText}`);
+                    });
+                }
+                const originalResponse = response;
+                return response.blob().then(blob => ({blob, originalResponse}));
+            })
+            .then(({blob, originalResponse}) => {
+                const url = window.URL.createObjectURL(blob);
+                const a = document.createElement('a');
+                a.style.display = 'none';
+                a.href = url;
+
+                let downloadFilename = "extracted_content.zip";
+                const contentDisposition = originalResponse.headers.get('content-disposition');
+                if (contentDisposition) {
+                    const filenameMatch = contentDisposition.match(/filename="?(.+)"?/i);
+                    if (filenameMatch && filenameMatch.length > 1) {
+                        downloadFilename = filenameMatch[1];
+                    }
+                }
+                a.download = downloadFilename;
+
+                document.body.appendChild(a);
+                a.click();
+
+                window.URL.revokeObjectURL(url);
+                document.body.removeChild(a);
+
+                alert("Task executed. Files should be downloading.");
+            })
+            .catch(error => {
+                console.error('Error executing task:', error);
+                alert(`Error executing task: ${error.message}`);
+            })
+            .finally(() => {
+                executeSentenceTaskBtn.disabled = false;
+                executeSentenceTaskBtn.textContent = "Execute Task";
+            });
         });
     }
 
