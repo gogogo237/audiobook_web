@@ -289,7 +289,6 @@
             <div id="ending-sentence-display" class="sentence-display-area">No ending sentence selected.</div>
         </div>
         <button id="execute-sentence-task-btn">Execute Task</button> <button id="distribute-timestamps-btn">Distribute Ending Sentence Time</button>
-        <p><small>Hint: Click the '⚙️' button (bottom left) to open this panel. Select a beginning and ending sentence to define an audio segment. Clicking 'Update Timestamps for Selection' will use the audio of this segment to generate and update timestamps for all sentences within the selected range.</small></p>
     </div>
     
     <button id="goToTopButton" title="Go to Top">⬆️</button> 
@@ -410,5 +409,10 @@
 
 
 {% block scripts %}
-<script src="{{ url_for('static', filename='js/article_view.js') }}" defer></script>
+<script src="{{ url_for('static', filename='js/modules/reading_location.js') }}" defer></script>
+<script src="{{ url_for('static', filename='js/modules/audio_playback.js') }}" defer></script>
+<script src="{{ url_for('static', filename='js/modules/sentence_selection.js') }}" defer></script>
+<script src="{{ url_for('static', filename='js/modules/ui_interactions.js') }}" defer></script>
+<script src="{{ url_for('static', filename='js/modules/gamepad_controls.js') }}" defer></script>
+<script src="{{ url_for('static', filename='js/article_init.js') }}" defer></script>
 {% endblock %}

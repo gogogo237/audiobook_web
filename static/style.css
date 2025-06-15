@@ -254,6 +254,22 @@ h1, h2 {
     background-color: #0056b3;
 }
 
+#distribute-timestamps-btn {
+    padding: 10px 18px;
+    background-color: #5cb85c; /* New background color */
+    color: white;
+    border: none;
+    border-radius: 4px;
+    cursor: pointer;
+    margin-top: 5px;
+    font-size: 1em;
+    transition: background-color 0.2s ease-in-out;
+}
+
+#distribute-timestamps-btn:hover {
+    background-color: #4cae4c; /* Darker shade of green */
+}
+
 /* --- Visual Distinction for Selected Sentences in Article --- */
 .selected-beginning-sentence {
     background-color: #d4edda !important; /* Light green */
