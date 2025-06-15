@@ -472,21 +472,39 @@ function displayWaveform(sentenceElement, audioBuffer, startTimeMs, endTimeMs) {
 
     clearExistingWaveform(sentenceElement); // This will be updated later to target the container
 
+    const ORIGINAL_WAVEFORM_MS_PER_PIXEL = WAVEFORM_MS_PER_PIXEL; // Should be 10
+    const MAX_CANVAS_WIDTH = 16384; // Max width based on common browser limits (e.g., Safari)
+    let effectiveMsPerPixel = ORIGINAL_WAVEFORM_MS_PER_PIXEL;
+
     const segmentDurationMs = endTimeMs - startTimeMs;
+    console.log("WAVEFORM_DEBUG: segmentDurationMs =", segmentDurationMs);
     if (segmentDurationMs <= 0) {
         console.error("displayWaveform: segmentDurationMs is zero or negative.");
         return;
     }
 
-    const canvasActualWidth = Math.max(50, Math.ceil(segmentDurationMs / WAVEFORM_MS_PER_PIXEL));
+    const canvasActualWidth = Math.max(50, Math.ceil(segmentDurationMs / ORIGINAL_WAVEFORM_MS_PER_PIXEL));
+    console.log("WAVEFORM_DEBUG: canvasActualWidth =", canvasActualWidth);
+
+    // Cap canvas width to prevent issues with extremely long sentences / large canvases.
+    // If capped, adjust the ms per pixel factor to fit the entire waveform.
+    let finalCanvasWidth = canvasActualWidth;
+    if (canvasActualWidth > MAX_CANVAS_WIDTH) {
+        console.warn(`WAVEFORM_INFO: Original calculated width ${canvasActualWidth}px exceeded MAX_CANVAS_WIDTH ${MAX_CANVAS_WIDTH}px. Capping width.`);
+        finalCanvasWidth = MAX_CANVAS_WIDTH;
+        effectiveMsPerPixel = segmentDurationMs / finalCanvasWidth;
+        console.log(`WAVEFORM_DEBUG: Capped width to ${finalCanvasWidth}px, new effectiveMsPerPixel = ${effectiveMsPerPixel}`);
+    } else {
+        effectiveMsPerPixel = ORIGINAL_WAVEFORM_MS_PER_PIXEL;
+    }
 
     const scrollContainer = document.createElement('div');
     scrollContainer.className = 'waveform-scroll-container';
 
     const canvas = document.createElement('canvas');
     canvas.className = 'waveform-canvas';
-    canvas.width = canvasActualWidth;  // Internal drawing surface width
-    canvas.style.width = canvasActualWidth + 'px'; // CSS width for scrolling
+    canvas.width = finalCanvasWidth;  // Internal drawing surface width
+    canvas.style.width = finalCanvasWidth + 'px'; // CSS width for scrolling
     canvas.height = 75; // Keep existing height
 
     scrollContainer.appendChild(canvas);
@@ -505,6 +523,7 @@ function displayWaveform(sentenceElement, audioBuffer, startTimeMs, endTimeMs) {
         return;
     }
 
+    console.log("WAVEFORM_DEBUG: Canvas dimensions before getContext: width =", canvas.width, "height =", canvas.height);
     const ctx = canvas.getContext('2d');
     if (!ctx) {
         console.error("displayWaveform: Failed to get 2D rendering context.");
@@ -580,6 +599,7 @@ function displayWaveform(sentenceElement, audioBuffer, startTimeMs, endTimeMs) {
         ctx.lineTo(canvas.width, canvas.height / 2); // Draw to middle if no data
     }
     ctx.stroke();
+    console.log("WAVEFORM_DEBUG: Waveform drawing attempted.");
 }
 
     // --- Audio Parts View UI ---
