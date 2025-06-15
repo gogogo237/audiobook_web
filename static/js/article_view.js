@@ -1620,7 +1620,7 @@ function displayWaveform(sentenceElement, audioBuffer, startTimeMs, endTimeMs) {
                     let sDbId = sentenceElement.dataset.sentenceDbId;
                     if (!sDbId || sDbId === "undefined" || sDbId === "null") {
                         const pIndex = sentenceElement.dataset.paragraphIndex;
-                        const sIndex = sentenceElement.dataset.sentenceIndexInParagraph;
+                        const sIndex = sentenceElement.dataset.sentenceIndex;
 
                         if (typeof fetchSentenceDbIdByIndices !== 'function') {
                             alert("Error: Required function fetchSentenceDbIdByIndices is not available.");
@@ -1740,7 +1740,7 @@ function displayWaveform(sentenceElement, audioBuffer, startTimeMs, endTimeMs) {
 
                     if (!sDbId || sDbId === "undefined" || sDbId === "null") { // Check for string "undefined" or "null" too
                         const pIndex = currentIterSentence.dataset.paragraphIndex;
-                        const sIndex = currentIterSentence.dataset.sentenceIndexInParagraph; // CORRECTED HERE
+                        const sIndex = currentIterSentence.dataset.sentenceIndex; // CORRECTED HERE
 
                         if (typeof fetchSentenceDbIdByIndices !== 'function') {
                             alert("Error: Critical function 'fetchSentenceDbIdByIndices' is not available. Aborting.");
