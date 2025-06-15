@@ -875,6 +875,7 @@ function displayWaveform(sentenceElement, audioBuffer, startTimeMs, endTimeMs) {
                     }
                     displayWaveform(highlightedSentence, audioBuffer, startTimeMs, endTimeMs);
                     break;
+                }
             }
             hideContextualMenu();
         });
