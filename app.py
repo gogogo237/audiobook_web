@@ -1086,6 +1086,82 @@ def execute_task_for_article(article_id):
         return jsonify({"status": "error", "message": f"An unexpected critical error occurred: {str(e)}"}), 500
 
 
+@app.route('/article/<int:article_id>/batch_update_timestamps', methods=['POST'])
+def batch_update_timestamps_route(article_id):
+    app.logger.info(f"APP: Received request to batch update timestamps for article {article_id}")
+    try:
+        data = request.get_json()
+        if not data:
+            app.logger.warning(f"APP: No JSON data received for batch update on article {article_id}.")
+            return jsonify(status='error', message='No data provided.'), 400
+
+        updates = data.get('updates')
+        if not isinstance(updates, list):
+            app.logger.warning(f"APP: Invalid payload for batch update on article {article_id}: 'updates' is not a list or is missing.")
+            return jsonify(status='error', message="'updates' field must be a list and is required."), 400
+
+        if not updates: # Empty list of updates
+            app.logger.info(f"APP: Received empty list of updates for article {article_id}.")
+            return jsonify(status='success', message='No updates to perform.'), 200
+
+        successful_updates_count = 0
+        failed_updates_ids = []
+
+        for update_item in updates:
+            sentence_id = update_item.get('id')
+            new_start_ms = update_item.get('new_start_ms')
+            new_end_ms = update_item.get('new_end_ms')
+
+            if not all(isinstance(val, int) for val in [sentence_id, new_start_ms, new_end_ms]):
+                app.logger.warning(f"APP: Invalid data types in update item for article {article_id}: {update_item}. Skipping.")
+                if sentence_id is not None:
+                     failed_updates_ids.append(sentence_id)
+                continue
+
+            if new_start_ms < 0 or new_end_ms < 0 or new_end_ms < new_start_ms:
+                app.logger.warning(f"APP: Invalid time values (negative or end < start) for sentence {sentence_id} in article {article_id}: start={new_start_ms}, end={new_end_ms}. Skipping.")
+                failed_updates_ids.append(sentence_id)
+                continue
+
+            try:
+                # Update start time
+                success_start = db_manager.update_sentence_single_timestamp(
+                    sentence_id=sentence_id,
+                    timestamp_type='start',
+                    new_time_ms=new_start_ms,
+                    app_logger=app.logger # Using app.logger as per existing code style
+                )
+                # Update end time
+                success_end = db_manager.update_sentence_single_timestamp(
+                    sentence_id=sentence_id,
+                    timestamp_type='end',
+                    new_time_ms=new_end_ms,
+                    app_logger=app.logger # Using app.logger
+                )
+
+                if success_start and success_end:
+                    successful_updates_count += 1
+                else:
+                    app.logger.error(f"APP: Failed to update timestamps for sentence {sentence_id} in DB (article {article_id}). Start success: {success_start}, End success: {success_end}.")
+                    failed_updates_ids.append(sentence_id)
+            except Exception as e_db:
+                app.logger.error(f"APP: DB exception updating sentence {sentence_id} for article {article_id}: {e_db}", exc_info=True)
+                failed_updates_ids.append(sentence_id)
+
+        if not failed_updates_ids:
+            app.logger.info(f"APP: Successfully updated {successful_updates_count} sentences for article {article_id}.")
+            return jsonify(status='success', message=f'{successful_updates_count} sentences updated successfully.')
+        else:
+            unique_failed_ids = sorted(list(set(failed_updates_ids)))
+            error_msg = f"Completed with errors. Successfully updated {successful_updates_count} sentences. Failed to update sentences with IDs: {unique_failed_ids}."
+            app.logger.warning(f"APP: Batch update for article {article_id} {error_msg}")
+            return jsonify(status='partial_success', message=error_msg, successful_count=successful_updates_count, failed_ids=unique_failed_ids), 200
+
+    except Exception as e:
+        app.logger.error(f"APP: Unexpected error in batch_update_timestamps_route for article {article_id}: {e}", exc_info=True)
+        return jsonify(status='error', message='An unexpected server error occurred.'), 500
+
+
 if __name__ == '__main__':
     app.logger.info(f"Starting Flask development server. Debug mode: {app.debug}")
     aeneas_path_env = os.environ.get("AENEAS_PYTHON_PATH")

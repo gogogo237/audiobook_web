@@ -48,6 +48,7 @@ document.addEventListener('DOMContentLoaded', function() {
     if (executeSentenceTaskBtn) {
         executeSentenceTaskBtn.textContent = "Update Timestamps for Selection"; // New button text
     }
+    const distributeTimestampsBtn = document.getElementById('distribute-timestamps-btn');
     // --- End Sentence Selection UI Elements ---
 
     const toggleAudiobookModeButton = document.getElementById('toggleAudiobookMode');
@@ -1551,6 +1552,134 @@ function displayWaveform(sentenceElement, audioBuffer, startTimeMs, endTimeMs) {
                 }, 200); // Match CSS transition duration
                 toggleSentenceSelectionBtn.textContent = '⚙️';
                 toggleSentenceSelectionBtn.title = 'Open/Close Sentence Actions Panel';
+            }
+        });
+    }
+
+    if (distributeTimestampsBtn) {
+        distributeTimestampsBtn.addEventListener('click', async () => {
+            if (!beginningSentenceElement || !endingSentenceElement) {
+                alert("Please select both a beginning and an ending sentence.");
+                return;
+            }
+
+            const segmentStartTimeMsStr = endingSentenceElement.dataset.startTimeMs;
+            const segmentEndTimeMsStr = endingSentenceElement.dataset.endTimeMs;
+
+            if (!segmentStartTimeMsStr || !segmentEndTimeMsStr) {
+                alert("The selected ending sentence does not have valid start or end timestamps.");
+                return;
+            }
+
+            const segmentStartTimeMs = parseInt(segmentStartTimeMsStr, 10);
+            const segmentEndTimeMs = parseInt(segmentEndTimeMsStr, 10);
+
+            if (isNaN(segmentStartTimeMs) || isNaN(segmentEndTimeMs)) {
+                alert("Ending sentence timestamps are not valid numbers.");
+                return;
+            }
+
+            const totalDurationForBlock = segmentEndTimeMs - segmentStartTimeMs;
+            if (totalDurationForBlock <= 0) {
+                alert("Ending sentence's duration is zero or negative. Cannot distribute time.");
+                return;
+            }
+
+            let sentencesInBlock = [];
+            let currentIterSentence = beginningSentenceElement;
+            let safetyCounter = 0; // Safety break for the loop
+            const maxSentences = sentenceElementsArray.length;
+
+            while (currentIterSentence) {
+                sentencesInBlock.push(currentIterSentence);
+                if (currentIterSentence === endingSentenceElement) break;
+
+                currentIterSentence = getAdjacentSentence(currentIterSentence, 'next');
+                safetyCounter++;
+                if (!currentIterSentence || safetyCounter > maxSentences) { // Also check if getAdjacentSentence returns null
+                    alert("Error iterating through selected sentences. Ending sentence may not be reachable or an infinite loop was detected.");
+                    return;
+                }
+            }
+
+            const numberOfSentencesInBlock = sentencesInBlock.length;
+            if (numberOfSentencesInBlock === 0) {
+                alert("No sentences found in the selected block.");
+                return;
+            }
+
+            const durationPerSentence = totalDurationForBlock / numberOfSentencesInBlock;
+            let currentProcessingStartTimeMs = segmentStartTimeMs;
+            let timestampUpdatesForBackend = [];
+
+            distributeTimestampsBtn.disabled = true;
+            distributeTimestampsBtn.textContent = "Processing...";
+
+            try {
+                for (const sentenceElement of sentencesInBlock) {
+                    let sDbId = sentenceElement.dataset.sentenceDbId;
+                    if (!sDbId || sDbId === "undefined" || sDbId === "null") {
+                        const pIndex = sentenceElement.dataset.paragraphIndex;
+                        const sIndex = sentenceElement.dataset.sentenceIndexInParagraph; // Corrected attribute name
+
+                        if (typeof fetchSentenceDbIdByIndices !== 'function') {
+                            alert("Error: Required function fetchSentenceDbIdByIndices is not available.");
+                            throw new Error("Function fetchSentenceDbIdByIndices missing");
+                        }
+                        const fetchedId = await fetchSentenceDbIdByIndices(ARTICLE_ID, pIndex, sIndex);
+                        if (!fetchedId) {
+                            alert(`Error fetching DB ID for sentence: '${sentenceElement.textContent.substring(0,30)}...'. Aborting.`);
+                            throw new Error("DB ID fetch failed for one or more sentences.");
+                        }
+                        sDbId = fetchedId.toString();
+                        sentenceElement.dataset.sentenceDbId = sDbId;
+                    }
+
+                    const newSentenceStartMs = Math.round(currentProcessingStartTimeMs);
+                    const newSentenceEndMs = Math.round(currentProcessingStartTimeMs + durationPerSentence);
+
+                    timestampUpdatesForBackend.push({
+                        'id': parseInt(sDbId, 10),
+                        'new_start_ms': newSentenceStartMs,
+                        'new_end_ms': newSentenceEndMs
+                    });
+                    currentProcessingStartTimeMs = newSentenceEndMs; // Next sentence starts where the current one ends
+                }
+
+                // Adjust the very last sentence's end time to exactly match segmentEndTimeMs
+                if (timestampUpdatesForBackend.length > 0) {
+                    timestampUpdatesForBackend[timestampUpdatesForBackend.length - 1].new_end_ms = segmentEndTimeMs;
+                }
+
+                // API Call to a new batch update endpoint
+                const response = await fetch(`/article/${ARTICLE_ID}/batch_update_timestamps`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ updates: timestampUpdatesForBackend })
+                });
+
+                const jsonData = await response.json();
+
+                if (response.ok && jsonData.status === 'success') {
+                    // Update DOM elements based on the data sent or received
+                    for (const updatedItem of timestampUpdatesForBackend) { // Using local array for now
+                        const elToUpdate = document.querySelector(`.english-sentence[data-sentence-db-id='${updatedItem.id}']`);
+                        if (elToUpdate) {
+                            elToUpdate.dataset.startTimeMs = updatedItem.new_start_ms;
+                            elToUpdate.dataset.endTimeMs = updatedItem.new_end_ms;
+                        }
+                    }
+                    alert(jsonData.message || `Successfully updated ${timestampUpdatesForBackend.length} sentences.`);
+                } else {
+                    alert(jsonData.message || "An error occurred on the server during batch update.");
+                }
+
+            } catch (error) {
+                console.error("Error in distributeTimestampsBtn handler:", error);
+                alert("An unexpected error occurred: " + error.message);
+            } finally {
+                distributeTimestampsBtn.disabled = false;
+                distributeTimestampsBtn.textContent = "Distribute Ending Sentence Time";
             }
         });
     }
