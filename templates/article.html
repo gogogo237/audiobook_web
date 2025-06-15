@@ -246,15 +246,26 @@
     }
     /* End NEW styles for gamepad EMOJI icon */
 
+    .waveform-scroll-container {
+        width: 100%; /* Takes the width of its containing block */
+        overflow-x: auto;
+        overflow-y: hidden;
+        height: 95px; /* Canvas height (75px) + scrollbar (~15px) + border (2x1px) + a little extra */
+        margin-top: 8px;
+        margin-bottom: 8px;
+        border: 1px solid #cccccc;
+        background-color: #f0f0f0; /* Light grey for the container */
+        box-sizing: border-box;
+        position: relative; /* For potential future absolute positioned children like a playhead */
+        -webkit-overflow-scrolling: touch; /* For smoother scrolling on iOS */
+    }
+
     .waveform-canvas {
-        display: block; /* Make it a block element to take full width of its parent paragraph */
-        width: 100%;    /* Ensure it respects the parent paragraph's width */
-        height: 75px;   /* Consistent with JS height setting */
-        margin-top: 10px; /* Space above the canvas, separating from sentence */
-        margin-bottom: 10px; /* Space below the canvas */
-        border: 1px solid #cccccc; /* A light border */
-        background-color: #f8f9fa; /* A light background, distinct from sentence highlight */
-        box-sizing: border-box; /* Include padding and border in the element's total width and height */
+        display: block; /* Still a block element within its container */
+        height: 75px;   /* Fixed height for drawing */
+        background-color: #ffffff; /* White background for the waveform drawing area itself */
+        /* width is set dynamically by JavaScript via canvas.width and canvas.style.width */
+        /* No margin or border here; those are on the scroll-container */
     }
 </style>
 {% endblock %}

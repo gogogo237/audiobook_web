@@ -67,6 +67,7 @@ document.addEventListener('DOMContentLoaded', function() {
     let currentLoadedAudioPartIndex = -1;
     let validClickCounter = 0;
     const CLICK_THRESHOLD_AUTOSAVE = 5;
+    const WAVEFORM_MS_PER_PIXEL = 10; // Each pixel represents 10ms of audio
 
     // --- Gamepad State ---
     let gamepadIndex = null;
@@ -299,11 +300,19 @@ document.addEventListener('DOMContentLoaded', function() {
         if (isAudiobookModeFull && audioBuffer && sentenceElement) { // Ensure sentenceElement is available for check
             let editActionText = "Edit Clip";
             let editActionIcon = "✏️";
-            const existingWaveform = sentenceElement.nextElementSibling;
-            if (existingWaveform && existingWaveform.classList.contains('waveform-canvas')) {
+            let waveformIsVisible = false;
+            if (sentenceElement.parentElement) {
+                const potentialContainer = sentenceElement.parentElement.nextElementSibling;
+                if (potentialContainer && potentialContainer.classList.contains('waveform-scroll-container')) {
+                    waveformIsVisible = true;
+                }
+            }
+
+            if (waveformIsVisible) {
                 editActionText = "Hide Waveform";
                 editActionIcon = "🗑️";
             }
+            // Note: Default is "Edit Clip" / "✏️", so no 'else' block needed for that.
             menuHTML += `<div class="contextual-menu-item" data-action="edit-audio-clip" title="${editActionText} for this sentence"><span class="menu-icon">${editActionIcon}</span><span class="menu-text">${editActionText}</span></div>`;
         }
 
@@ -441,10 +450,13 @@ document.addEventListener('DOMContentLoaded', function() {
     }
 
 function clearExistingWaveform(sentenceElement) {
-    if (!sentenceElement) return;
-    const nextElement = sentenceElement.nextElementSibling;
-    if (nextElement && nextElement.classList.contains('waveform-canvas')) {
-        nextElement.remove();
+    if (!sentenceElement || !sentenceElement.parentElement) {
+        console.error("clearExistingWaveform: sentenceElement or its parent is null.");
+        return;
+    }
+    const potentialContainer = sentenceElement.parentElement.nextElementSibling;
+    if (potentialContainer && potentialContainer.classList.contains('waveform-scroll-container')) {
+        potentialContainer.remove();
     }
 }
 
@@ -458,33 +470,40 @@ function displayWaveform(sentenceElement, audioBuffer, startTimeMs, endTimeMs) {
         return;
     }
 
-    clearExistingWaveform(sentenceElement);
+    clearExistingWaveform(sentenceElement); // This will be updated later to target the container
 
-    const canvas = document.createElement('canvas');
-    canvas.className = 'waveform-canvas';
-    canvas.height = 75; // Fixed height for the waveform
-
-    // Set canvas width based on its parent paragraph, ensuring it's visible
-    if (sentenceElement.parentElement) {
-        canvas.style.width = '100%'; // Make canvas responsive within its container
-        canvas.width = sentenceElement.parentElement.offsetWidth; // Actual drawing surface width
-    } else {
-        canvas.style.width = '100%'; // Default fallback
-        canvas.width = 300; // Default drawing surface width if parent is not found
-        console.warn("displayWaveform: sentenceElement.parentElement is null. Using default canvas width.");
-    }
-     // Ensure canvas has a positive width, otherwise drawing makes no sense.
-    if (canvas.width <= 0) {
-        console.warn("displayWaveform: Calculated canvas width is 0 or negative. Aborting waveform display.");
-        // Optionally, try to set a minimum width or log more details.
-        // For now, just return to avoid errors.
+    const segmentDurationMs = endTimeMs - startTimeMs;
+    if (segmentDurationMs <= 0) {
+        console.error("displayWaveform: segmentDurationMs is zero or negative.");
         return;
     }
 
+    const canvasActualWidth = Math.max(50, Math.ceil(segmentDurationMs / WAVEFORM_MS_PER_PIXEL));
 
-    // Insert the canvas into the DOM after the sentenceElement
-    // This might need adjustment if it causes layout issues, e.g., inserting after parent <p>
-    sentenceElement.insertAdjacentElement('afterend', canvas);
+    const scrollContainer = document.createElement('div');
+    scrollContainer.className = 'waveform-scroll-container';
+
+    const canvas = document.createElement('canvas');
+    canvas.className = 'waveform-canvas';
+    canvas.width = canvasActualWidth;  // Internal drawing surface width
+    canvas.style.width = canvasActualWidth + 'px'; // CSS width for scrolling
+    canvas.height = 75; // Keep existing height
+
+    scrollContainer.appendChild(canvas);
+
+    if (sentenceElement.parentElement) {
+        sentenceElement.parentElement.insertAdjacentElement('afterend', scrollContainer);
+    } else {
+        console.error('displayWaveform: Sentence element has no parent. Cannot insert waveform container.');
+        return;
+    }
+
+    // Ensure canvas has a positive width, otherwise drawing makes no sense.
+    // This check should now use canvasActualWidth or canvas.width
+    if (canvas.width <= 0) {
+        console.warn("displayWaveform: Calculated canvas width is 0 or negative. Aborting waveform display.");
+        return;
+    }
 
     const ctx = canvas.getContext('2d');
     if (!ctx) {
@@ -821,13 +840,20 @@ function displayWaveform(sentenceElement, audioBuffer, startTimeMs, endTimeMs) {
                     if (!highlightedSentence) {
                         break;
                     }
-                    const existingWaveform = highlightedSentence.nextElementSibling;
-                    if (existingWaveform && existingWaveform.classList.contains('waveform-canvas')) {
+                    let waveformIsCurrentlyVisible = false;
+                    if (highlightedSentence.parentElement) {
+                        const potentialContainer = highlightedSentence.parentElement.nextElementSibling;
+                        if (potentialContainer && potentialContainer.classList.contains('waveform-scroll-container')) {
+                            waveformIsCurrentlyVisible = true;
+                        }
+                    }
+
+                    if (waveformIsCurrentlyVisible) {
                         clearExistingWaveform(highlightedSentence);
                         break;
-                    }
-                    // If waveform doesn't exist, proceed to display it
-                    const startTimeMsStr = highlightedSentence.dataset.startTimeMs;
+                    } else {
+                        // Waveform is not visible, so display it
+                        const startTimeMsStr = highlightedSentence.dataset.startTimeMs;
                     const endTimeMsStr = highlightedSentence.dataset.endTimeMs;
 
                     if (!startTimeMsStr || !endTimeMsStr) {
