@@ -964,7 +964,7 @@ def execute_task_for_article(article_id):
 
         base_filename = "".join(c if c.isalnum() or c in ('.', '_') else '_' for c in article['filename']) # Dictionary access
         txt_filename = f"partof_{base_filename}.txt"
-        pcm_filename = f"partof_{base_filename}.pcm"
+        mp3_filename = f"partof_{base_filename}.mp3" # Changed from pcm_filename
         zip_filename = f"partof_{base_filename}.zip"
 
         text_content = "\n".join(sentence_texts) # Corrected newline usage
@@ -977,12 +977,11 @@ def execute_task_for_article(article_id):
             audio_segment = audio[start_time_ms:end_time_ms]
             current_app.logger.info(f"Audio segment sliced: {len(audio_segment)}ms")
 
-            if audio_segment.sample_width != 2:
-                 current_app.logger.info(f"Original sample width is {audio_segment.sample_width} bytes. Converting to 16-bit (2 bytes).")
-                 audio_segment = audio_segment.set_sample_width(2)
-
-            pcm_data = audio_segment.raw_data
-            current_app.logger.info(f"PCM data extracted: {len(pcm_data)} bytes. Expected format: 16-bit, {audio_segment.frame_rate}Hz, {audio_segment.channels}ch")
+            # Export to MP3
+            mp3_export_buffer = io.BytesIO()
+            audio_segment.export(mp3_export_buffer, format="mp3") # Optional: add bitrate="192k"
+            mp3_data_bytes = mp3_export_buffer.getvalue()
+            current_app.logger.info(f"MP3 data exported: {len(mp3_data_bytes)} bytes")
 
         except Exception as e:
             current_app.logger.error(f"Error processing audio for article {article_id}: {e}", exc_info=True)
@@ -991,7 +990,7 @@ def execute_task_for_article(article_id):
         zip_buffer = io.BytesIO()
         with zipfile.ZipFile(zip_buffer, "w", zipfile.ZIP_DEFLATED) as zf:
             zf.writestr(txt_filename, text_content.encode('utf-8'))
-            zf.writestr(pcm_filename, pcm_data)
+            zf.writestr(mp3_filename, mp3_data_bytes) # Use mp3_filename and mp3_data_bytes
 
         zip_buffer.seek(0)
 
