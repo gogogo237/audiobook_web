@@ -1626,6 +1626,11 @@ function displayWaveform(sentenceElement, audioBuffer, startTimeMs, endTimeMs) {
                             alert("Error: Required function fetchSentenceDbIdByIndices is not available.");
                             throw new Error("Function fetchSentenceDbIdByIndices missing");
                         }
+                        // Make sure pIndex and sIndex are valid before calling
+                        if (pIndex === undefined || sIndex === undefined) {
+                            alert(`Error: Missing paragraph or sentence index for sentence: '${sentenceElement.textContent.substring(0,30)}...'. Aborting.`);
+                            throw new Error("Missing pIndex or sIndex for DB ID fetch");
+                        }
                         const fetchedId = await fetchSentenceDbIdByIndices(ARTICLE_ID, pIndex, sIndex);
                         if (!fetchedId) {
                             alert(`Error fetching DB ID for sentence: '${sentenceElement.textContent.substring(0,30)}...'. Aborting.`);
