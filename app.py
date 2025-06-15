@@ -788,6 +788,44 @@ def save_reading_location(article_id):
         app.logger.error(f"APP: Failed to save reading location for article {article_id} (book {book_id_for_location}): {e}", exc_info=True)
         return jsonify({'status': 'error', 'message': f'Failed to save location: {str(e)}'}), 500
 
+
+@app.route('/article/<int:article_id>/get_sentence_id_by_indices', methods=['GET'])
+def get_sentence_id_by_indices_route(article_id):
+    app.logger.info(f"APP: Request to get sentence ID for article {article_id} by indices.")
+    paragraph_index_str = request.args.get('paragraph_index')
+    sentence_index_str = request.args.get('sentence_index') # As per requirement
+
+    if paragraph_index_str is None or sentence_index_str is None:
+        app.logger.warning(f"APP: Missing query parameters for get_sentence_id_by_indices for article {article_id}. P_idx: '{paragraph_index_str}', S_idx: '{sentence_index_str}'.")
+        return jsonify({"error": "Missing required query parameters: paragraph_index and sentence_index"}), 400
+
+    try:
+        paragraph_index = int(paragraph_index_str)
+        sentence_index_in_paragraph = int(sentence_index_str) # Passed to db_manager function
+    except ValueError:
+        app.logger.warning(f"APP: Invalid query parameter types for get_sentence_id_by_indices for article {article_id}. P_idx: '{paragraph_index_str}', S_idx: '{sentence_index_str}'.")
+        return jsonify({"error": "Query parameters paragraph_index and sentence_index must be integers."}), 400
+
+    try:
+        # The db_manager function is called get_sentence_id_by_indices
+        # and expects sentence_index_in_paragraph as the third argument.
+        sentence_db_id = db_manager.get_sentence_id_by_indices(
+            article_id,
+            paragraph_index,
+            sentence_index_in_paragraph, # Correctly named for the db_manager function
+            app_logger=app.logger
+        )
+
+        if sentence_db_id is not None:
+            app.logger.info(f"APP: Found sentence ID {sentence_db_id} for article {article_id}, P:{paragraph_index}, S:{sentence_index_in_paragraph}.")
+            return jsonify({"sentence_db_id": sentence_db_id}), 200
+        else:
+            app.logger.info(f"APP: Sentence not found for article {article_id}, P:{paragraph_index}, S:{sentence_index_in_paragraph}.")
+            return jsonify({"error": "Sentence not found"}), 404
+    except Exception as e:
+        app.logger.error(f"APP: Error calling get_sentence_id_by_indices for article {article_id}, P:{paragraph_index}, S:{sentence_index_in_paragraph}: {e}", exc_info=True)
+        return jsonify({"error": "An internal server error occurred."}), 500
+
 @app.route('/article/<int:article_id>/sentence/<int:sentence_id>/update_timestamp', methods=['POST'])
 def update_sentence_timestamp_route(article_id, sentence_id):
     app.logger.info(f"APP: Received request to update timestamp for article {article_id}, sentence {sentence_id}")

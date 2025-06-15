@@ -476,6 +476,42 @@ def get_english_sentences_for_article(article_id, app_logger=None):
     finally:
         if conn: conn.close()
 
+def get_sentence_id_by_indices(article_id, paragraph_index, sentence_index_in_paragraph, app_logger=None):
+    """
+    Retrieves the ID of a sentence based on its article ID, paragraph index,
+    and sentence index within the paragraph.
+
+    Args:
+        article_id (int): The ID of the article.
+        paragraph_index (int): The index of the paragraph.
+        sentence_index_in_paragraph (int): The index of the sentence within the paragraph.
+        app_logger (logging.Logger, optional): Logger instance. Defaults to None.
+
+    Returns:
+        int or None: The ID of the sentence if found, otherwise None.
+    """
+    logger = app_logger if app_logger else default_logger
+    conn = get_db_connection()
+    try:
+        cursor = conn.cursor()
+        cursor.execute("""
+            SELECT id
+            FROM sentences
+            WHERE article_id = ? AND paragraph_index = ? AND sentence_index_in_paragraph = ?
+        """, (article_id, paragraph_index, sentence_index_in_paragraph))
+        row = cursor.fetchone()
+        if row:
+            logger.debug(f"DB: Found sentence ID {row['id']} for article {article_id}, P:{paragraph_index}, S:{sentence_index_in_paragraph}.")
+            return row['id']
+        else:
+            logger.debug(f"DB: No sentence found for article {article_id}, P:{paragraph_index}, S:{sentence_index_in_paragraph}.")
+            return None
+    except sqlite3.Error as e:
+        logger.error(f"DB: Error fetching sentence ID by indices for article {article_id}, P:{paragraph_index}, S:{sentence_index_in_paragraph}: {e}", exc_info=True)
+        return None
+    finally:
+        if conn: conn.close()
+
 def update_sentence_timestamps(article_id, timestamps_data, app_logger=None):
     logger = app_logger if app_logger else default_logger
     conn = get_db_connection()

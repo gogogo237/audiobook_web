@@ -501,6 +501,29 @@ function clearExistingWaveform(sentenceElement) {
     }
 }
 
+async function fetchSentenceDbIdByIndices(articleId, paragraphIndex, sentenceIndex) {
+    const url = `/article/${articleId}/get_sentence_id_by_indices?paragraph_index=${paragraphIndex}&sentence_index=${sentenceIndex}`;
+    console.log(`JS: Fetching sentence_db_id from: ${url}`);
+    try {
+        const response = await fetch(url);
+        if (!response.ok) {
+            console.error(`JS: Failed to fetch sentence_db_id. Status: ${response.status}, Text: ${await response.text()}`);
+            return null;
+        }
+        const data = await response.json();
+        if (data && typeof data.sentence_db_id !== 'undefined') {
+            console.log(`JS: Successfully fetched sentence_db_id: ${data.sentence_db_id}`);
+            return data.sentence_db_id;
+        } else {
+            console.error("JS: Failed to fetch sentence_db_id: ID missing in response.", data);
+            return null;
+        }
+    } catch (error) {
+        console.error("JS: Network or other error fetching sentence_db_id:", error);
+        return null;
+    }
+}
+
 async function updateSentenceTimestampOnServer(sentenceDbId, timestampType, newTimeMs) {
     const url = `/article/${ARTICLE_ID}/sentence/${sentenceDbId}/update_timestamp`;
     try {
@@ -652,7 +675,7 @@ function displayWaveform(sentenceElement, audioBuffer, startTimeMs, endTimeMs) {
     // The global isAudiobookModeFull can indicate this.
     canvas.isSegmentFromFullAudio = isAudiobookModeFull; // True if these times are for the full audio.
 
-    canvas.addEventListener('click', function(event) {
+    canvas.addEventListener('click', async function(event) { // Made async
         const clickX = event.offsetX; // Used by all modes
         const calculatedTimeOffsetInSegmentMs = clickX * this.effectiveMsPerPixel; // Raw offset from canvas start
 
@@ -670,11 +693,31 @@ function displayWaveform(sentenceElement, audioBuffer, startTimeMs, endTimeMs) {
                 console.log("Waveform CTRL+Click: Timestamp editing via waveform click is currently only supported on the full audio view.");
                 return;
             }
-            const sentenceDbId = highlightedSentence.dataset.sentenceDbId;
+            let sentenceDbId = highlightedSentence.dataset.sentenceDbId;
             if (!sentenceDbId) {
-                console.error("Waveform CTRL+Click: Sentence DB ID missing on highlighted sentence.");
-                return;
+                const pIndex = highlightedSentence.dataset.paragraphIndex;
+                const sIndex = highlightedSentence.dataset.sentenceIndex;
+                if (typeof ARTICLE_ID === 'undefined' || ARTICLE_ID === null) {
+                    console.error("Waveform CTRL+Click: ARTICLE_ID is not available globally.");
+                    return;
+                }
+                if (pIndex !== undefined && sIndex !== undefined) {
+                    console.log(`Waveform CTRL+Click: sentence_db_id missing. Fetching for p:${pIndex}, s:${sIndex}`);
+                    const newSentenceDbId = await fetchSentenceDbIdByIndices(ARTICLE_ID, pIndex, sIndex);
+                    if (newSentenceDbId) {
+                        highlightedSentence.dataset.sentenceDbId = newSentenceDbId;
+                        sentenceDbId = newSentenceDbId; // Use the newly fetched ID
+                        console.log(`Waveform CTRL+Click: Successfully fetched sentence_db_id: ${sentenceDbId}`);
+                    } else {
+                        console.error(`Waveform CTRL+Click: Could not retrieve sentence_db_id for p:${pIndex}, s:${sIndex}. Timestamp update aborted.`);
+                        return;
+                    }
+                } else {
+                    console.error("Waveform CTRL+Click: Cannot fetch sentence_db_id because paragraphIndex or sentenceIndex is missing from dataset.");
+                    return;
+                }
             }
+
             const currentEndTimeMsStr = highlightedSentence.dataset.endTimeMs;
             if (!currentEndTimeMsStr) {
                  console.error("Waveform CTRL+Click: Original end time (data-end-time-ms) missing on highlighted sentence.");
@@ -709,11 +752,31 @@ function displayWaveform(sentenceElement, audioBuffer, startTimeMs, endTimeMs) {
                 console.log("Waveform ALT+Click: Timestamp editing via waveform click is currently only supported on the full audio view.");
                 return;
             }
-            const sentenceDbId = highlightedSentence.dataset.sentenceDbId;
+            let sentenceDbId = highlightedSentence.dataset.sentenceDbId;
             if (!sentenceDbId) {
-                console.error("Waveform ALT+Click: Sentence DB ID missing on highlighted sentence.");
-                return;
+                const pIndex = highlightedSentence.dataset.paragraphIndex;
+                const sIndex = highlightedSentence.dataset.sentenceIndex;
+                if (typeof ARTICLE_ID === 'undefined' || ARTICLE_ID === null) {
+                    console.error("Waveform ALT+Click: ARTICLE_ID is not available globally.");
+                    return;
+                }
+                if (pIndex !== undefined && sIndex !== undefined) {
+                    console.log(`Waveform ALT+Click: sentence_db_id missing. Fetching for p:${pIndex}, s:${sIndex}`);
+                    const newSentenceDbId = await fetchSentenceDbIdByIndices(ARTICLE_ID, pIndex, sIndex);
+                    if (newSentenceDbId) {
+                        highlightedSentence.dataset.sentenceDbId = newSentenceDbId;
+                        sentenceDbId = newSentenceDbId; // Use the newly fetched ID
+                        console.log(`Waveform ALT+Click: Successfully fetched sentence_db_id: ${sentenceDbId}`);
+                    } else {
+                        console.error(`Waveform ALT+Click: Could not retrieve sentence_db_id for p:${pIndex}, s:${sIndex}. Timestamp update aborted.`);
+                        return;
+                    }
+                } else {
+                    console.error("Waveform ALT+Click: Cannot fetch sentence_db_id because paragraphIndex or sentenceIndex is missing from dataset.");
+                    return;
+                }
             }
+
             const currentStartTimeMsStr = highlightedSentence.dataset.startTimeMs;
              if (!currentStartTimeMsStr) {
                  console.error("Waveform ALT+Click: Original start time (data-start-time-ms) missing on highlighted sentence.");
