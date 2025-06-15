@@ -410,5 +410,13 @@
 
 
 {% block scripts %}
-<script src="{{ url_for('static', filename='js/article_view.js') }}" defer></script>
+<script src="{{ url_for('static', filename='js/article_view_config.js') }}" defer></script>
+<script src="{{ url_for('static', filename='js/article_view_ui.js') }}" defer></script>
+<script src="{{ url_for('static', filename='js/article_view_sentences.js') }}" defer></script>
+<script src="{{ url_for('static', filename='js/article_view_audio.js') }}" defer></script>
+<script src="{{ url_for('static', filename='js/article_view_audio_parts.js') }}" defer></script>
+<script src="{{ url_for('static', filename='js/article_view_waveform.js') }}" defer></script>
+<script src="{{ url_for('static', filename='js/article_view_sentence_selection.js') }}" defer></script>
+<script src="{{ url_for('static', filename='js/article_view_gamepad.js') }}" defer></script>
+<script src="{{ url_for('static', filename='js/article_view_main.js') }}" defer></script>
 {% endblock %}
