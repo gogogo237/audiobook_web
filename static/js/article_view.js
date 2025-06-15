@@ -38,6 +38,10 @@ document.addEventListener('DOMContentLoaded', function() {
     // --- Sentence Selection UI Elements ---
     const toggleSentenceSelectionBtn = document.getElementById('toggle-sentence-selection-btn');
     const sentenceSelectionUIContainer = document.getElementById('sentence-selection-ui-container');
+    // --- Debug Logging Start ---
+    console.log("DEBUG: Toggle button element:", toggleSentenceSelectionBtn);
+    console.log("DEBUG: Selection panel element:", sentenceSelectionUIContainer);
+    // --- Debug Logging End ---
     const beginningSentenceDisplay = document.getElementById('beginning-sentence-display');
     const endingSentenceDisplay = document.getElementById('ending-sentence-display');
     const executeSentenceTaskBtn = document.getElementById('execute-sentence-task-btn');
@@ -387,6 +391,7 @@ document.addEventListener('DOMContentLoaded', function() {
         }
 
         // --- Add Sentence Selection Submenu if UI is visible ---
+        console.log("DEBUG: populateAndShowContextualMenu: isSentenceSelectionUIVisible =", isSentenceSelectionUIVisible, "sentenceElement valid:", !!sentenceElement); // Debug log
         if (isSentenceSelectionUIVisible && sentenceElement) {
             menuHTML += `<div class="contextual-menu-item contextual-menu-item-assign" data-action="assign-sentence-submenu">
                             <span class="menu-icon">🎯</span>
@@ -1516,10 +1521,46 @@ function displayWaveform(sentenceElement, audioBuffer, startTimeMs, endTimeMs) {
 
     // --- Initial Setup Calls ---
     populateSentenceElementsArray();
+    initializeSentenceSelectionDisplays(); // Initialize sentence selection display areas
     initAudioContextGlobally();
     updateGamepadIconDisplay(false); // Set initial icon state
 
     // Event Listeners Setup
+    // --- Sentence Selection UI Event Listeners ---
+    if (toggleSentenceSelectionBtn && sentenceSelectionUIContainer) {
+        toggleSentenceSelectionBtn.addEventListener('click', () => {
+            console.log("DEBUG: Toggle button clicked!");
+            console.log("DEBUG: isSentenceSelectionUIVisible before toggle:", isSentenceSelectionUIVisible);
+            isSentenceSelectionUIVisible = !isSentenceSelectionUIVisible;
+            console.log("DEBUG: isSentenceSelectionUIVisible after toggle:", isSentenceSelectionUIVisible);
+            if (isSentenceSelectionUIVisible) {
+                sentenceSelectionUIContainer.style.display = 'flex';
+                toggleSentenceSelectionBtn.textContent = '✅';
+                toggleSentenceSelectionBtn.title = 'Hide Sentence Actions Panel'; // Updated title
+            } else {
+                sentenceSelectionUIContainer.style.display = 'none';
+                toggleSentenceSelectionBtn.textContent = '⚙️'; // Corrected icon for "Open" state
+                toggleSentenceSelectionBtn.title = 'Open/Close Sentence Actions Panel'; // Corrected title for "Open" state
+            }
+            console.log("DEBUG: Panel display style set to:", sentenceSelectionUIContainer.style.display);
+        });
+    }
+
+    if (executeSentenceTaskBtn) {
+        executeSentenceTaskBtn.addEventListener('click', () => {
+            if (!beginningSentenceText && !endingSentenceText) {
+                alert("Please select a beginning and/or an ending sentence first.");
+            } else {
+                // For now, just an alert. Later this will trigger a backend call.
+                alert("Task Execution:\n\nBeginning: " + (beginningSentenceText || "None") + "\n\nEnding: " + (endingSentenceText || "None"));
+                // Example of how to get sentence IDs if needed:
+                // const beginningId = beginningSentenceElement ? beginningSentenceElement.dataset.sentenceDbId : null;
+                // const endingId = endingSentenceElement ? endingSentenceElement.dataset.sentenceDbId : null;
+                // console.log("Begin ID:", beginningId, "End ID:", endingId);
+            }
+        });
+    }
+
     if (articleContentWrapper) {
         articleContentWrapper.addEventListener('contextmenu', function(event) {
             const targetSentence = event.target.closest('.english-sentence');

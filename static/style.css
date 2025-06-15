@@ -183,10 +183,13 @@ h1, h2 {
     border: 1px solid #ccc;
     padding: 5px 8px;
     cursor: pointer;
-    vertical-align: middle; /* Or bottom, adjust as needed */
-    margin-left: 8px;
-    font-size: 1.2em; /* Adjust if '📝' is too small/large */
+    /* vertical-align: middle; */ /* Replaced by flex alignment */
+    margin-left: 0; /* Spacing now handled by parent flex gap */
+    font-size: 1.2em; /* Keep or adjust as needed for new '⚙️' icon */
     border-radius: 4px;
+    display: inline-flex; /* For aligning icon within button */
+    align-items: center;
+    justify-content: center;
 }
 
 #toggle-sentence-selection-btn:hover {

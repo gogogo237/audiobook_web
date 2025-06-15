@@ -218,9 +218,7 @@
         margin-bottom: 10px; /* Space before the button */
     }
     #gamepad-status-emoji {
-        position: fixed;
-        bottom: 10px; /* Adjust as needed */
-        left: 10px;   /* Adjust as needed */
+        /* position, bottom, left, z-index are now handled by the new #fixed-action-buttons wrapper */
         font-size: 1.8em; /* Adjust emoji size */
         padding: 5px;
         background-color: rgba(255, 255, 255, 0.0); /* Transparent background initially */
@@ -230,7 +228,6 @@
         line-height: 30px; /* For vertical centering of emoji */
         text-align: center; /* For horizontal centering of emoji */
         cursor: default;
-        z-index: 1005;
         transition: color 0.3s ease-in-out, background-color 0.3s ease-in-out; /* Smooth color transition */
         color: #AAAAAA; /* Default: Disconnected color */
     }
@@ -313,8 +310,10 @@
         }}
     </script>
     {# --- END NEW --- #}
-    <div id="gamepad-status-emoji" title="No Gamepad Connected">🎮</div>
-    <button id="toggle-sentence-selection-btn" title="Toggle Sentence Selection UI">📝</button>
+    <div id="fixed-action-buttons" style="position: fixed; bottom: 10px; left: 10px; z-index: 1005; display: flex; align-items: center; gap: 8px;">
+        <div id="gamepad-status-emoji" title="No Gamepad Connected">🎮</div>
+        <button id="toggle-sentence-selection-btn" title="Open/Close Sentence Actions Panel">⚙️</button>
+    </div>
 
 
     {% if article.mp3_parts_folder_path and article.num_audio_parts and article.num_audio_parts > 0 %}
