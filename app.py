@@ -1,4 +1,5 @@
 import os
+import sys
 import tempfile
 import shutil
 from pathlib import Path
@@ -987,10 +988,74 @@ def execute_task_for_article(article_id):
             current_app.logger.error(f"Error processing audio for article {article_id}: {e}", exc_info=True)
             return jsonify({"message": f"Error processing audio: {str(e)}"}), 500
 
+        # --- SRT Generation using Aeneas ---
+        temp_mp3_file_path = None
+        temp_txt_file_path = None
+        temp_srt_output_file_path = None # Path for Aeneas to write its output
+        srt_content_bytes = None
+
+        try:
+            # 1. Create temporary MP3 file from mp3_data_bytes
+            with tempfile.NamedTemporaryFile(suffix=".mp3", delete=False) as tmp_mp3:
+                tmp_mp3.write(mp3_data_bytes)
+                temp_mp3_file_path = tmp_mp3.name
+            current_app.logger.info(f"Temporary MP3 for Aeneas: {temp_mp3_file_path}")
+
+            # 2. Create temporary TXT file from sentence_texts
+            with tempfile.NamedTemporaryFile(suffix=".txt", delete=False) as tmp_txt_obj:
+                temp_txt_file_path = tmp_txt_obj.name
+            audio_processor.create_plain_text_file_from_list(sentence_texts, temp_txt_file_path, logger=current_app.logger)
+            current_app.logger.info(f"Temporary TXT for Aeneas: {temp_txt_file_path}")
+
+            # 3. Get a path for Aeneas to write its SRT output
+            with tempfile.NamedTemporaryFile(suffix=".srt", delete=False) as tmp_srt_out_obj:
+                temp_srt_output_file_path = tmp_srt_out_obj.name
+            current_app.logger.info(f"Temporary SRT output path for Aeneas: {temp_srt_output_file_path}")
+
+            python_executable = current_app.config.get('AENEAS_PYTHON_PATH', sys.executable)
+            current_app.logger.info(f"Using Python executable for Aeneas: {python_executable}")
+
+            audio_processor.run_aeneas_alignment(
+                temp_mp3_file_path,
+                temp_txt_file_path,
+                temp_srt_output_file_path,
+                python_executable,
+                logger=current_app.logger
+            )
+
+            with open(temp_srt_output_file_path, 'r', encoding='utf-8') as f_srt_content:
+                srt_file_content_str = f_srt_content.read()
+
+            if srt_file_content_str and srt_file_content_str.strip():
+                srt_content_bytes = srt_file_content_str.encode('utf-8')
+                current_app.logger.info(f"SRT content generated successfully by Aeneas ({len(srt_content_bytes)} bytes).")
+            else:
+                current_app.logger.warning("Aeneas produced an empty or whitespace-only SRT file.")
+
+        except Exception as e_aeneas:
+            current_app.logger.error(f"Error during Aeneas SRT generation: {e_aeneas}", exc_info=True)
+        finally:
+            if temp_mp3_file_path and os.path.exists(temp_mp3_file_path):
+                os.remove(temp_mp3_file_path)
+                current_app.logger.info(f"Cleaned up temporary MP3: {temp_mp3_file_path}")
+            if temp_txt_file_path and os.path.exists(temp_txt_file_path):
+                os.remove(temp_txt_file_path)
+                current_app.logger.info(f"Cleaned up temporary TXT: {temp_txt_file_path}")
+            if temp_srt_output_file_path and os.path.exists(temp_srt_output_file_path):
+                os.remove(temp_srt_output_file_path)
+                current_app.logger.info(f"Cleaned up temporary Aeneas SRT output: {temp_srt_output_file_path}")
+        # --- End SRT Generation ---
+
         zip_buffer = io.BytesIO()
         with zipfile.ZipFile(zip_buffer, "w", zipfile.ZIP_DEFLATED) as zf:
             zf.writestr(txt_filename, text_content.encode('utf-8'))
             zf.writestr(mp3_filename, mp3_data_bytes) # Use mp3_filename and mp3_data_bytes
+            if srt_content_bytes:
+                srt_filename = f"partof_{base_filename}.srt"
+                zf.writestr(srt_filename, srt_content_bytes)
+                current_app.logger.info(f"Added SRT file to zip: {srt_filename}")
+            else:
+                current_app.logger.info("No SRT content generated or Aeneas failed; SRT file not added to zip.")
 
         zip_buffer.seek(0)
 
