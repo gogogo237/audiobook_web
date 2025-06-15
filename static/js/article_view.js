@@ -296,8 +296,15 @@ document.addEventListener('DOMContentLoaded', function() {
         let menuHTML = `<div class="contextual-menu-item" data-action="show-translation" title="Show Chinese Translation"><span class="menu-icon">💬</span><span class="menu-text">Translate</span></div>`;
         menuHTML += `<div class="contextual-menu-item" data-action="save-location" title="Save this reading location"><span class="menu-icon">💾</span><span class="menu-text">Save Spot</span></div>`;
 
-        if (isAudiobookModeFull && audioBuffer) {
-            menuHTML += `<div class="contextual-menu-item" data-action="edit-audio-clip" title="Display audio waveform for this sentence"><span class="menu-icon">✏️</span><span class="menu-text">Edit Clip</span></div>`;
+        if (isAudiobookModeFull && audioBuffer && sentenceElement) { // Ensure sentenceElement is available for check
+            let editActionText = "Edit Clip";
+            let editActionIcon = "✏️";
+            const existingWaveform = sentenceElement.nextElementSibling;
+            if (existingWaveform && existingWaveform.classList.contains('waveform-canvas')) {
+                editActionText = "Hide Waveform";
+                editActionIcon = "🗑️";
+            }
+            menuHTML += `<div class="contextual-menu-item" data-action="edit-audio-clip" title="${editActionText} for this sentence"><span class="menu-icon">${editActionIcon}</span><span class="menu-text">${editActionText}</span></div>`;
         }
 
         const canPlayAudio = (isAudiobookModeFull && audioContext && audioBuffer && HAS_TIMESTAMPS) ||
@@ -811,7 +818,15 @@ function displayWaveform(sentenceElement, audioBuffer, startTimeMs, endTimeMs) {
                     } else { alert("Audio not ready or sentence part mismatch."); }
                     break;
                 case 'edit-audio-clip':
-                    if (!highlightedSentence) break;
+                    if (!highlightedSentence) {
+                        break;
+                    }
+                    const existingWaveform = highlightedSentence.nextElementSibling;
+                    if (existingWaveform && existingWaveform.classList.contains('waveform-canvas')) {
+                        clearExistingWaveform(highlightedSentence);
+                        break;
+                    }
+                    // If waveform doesn't exist, proceed to display it
                     const startTimeMsStr = highlightedSentence.dataset.startTimeMs;
                     const endTimeMsStr = highlightedSentence.dataset.endTimeMs;
 
