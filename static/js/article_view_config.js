@@ -4,6 +4,7 @@
 // --- Retrieve Python Data ---
 let articleData = {};
 const articleDataElement = document.getElementById('article-data-json');
+console.log("CONFIG_DEBUG: articleDataElement found:", !!articleDataElement);
 if (articleDataElement) {
     try {
         articleData = JSON.parse(articleDataElement.textContent);
@@ -15,6 +16,13 @@ if (articleDataElement) {
             convertedMp3Path: null, mp3PartsFolderPath: null
         };
     }
+} else {
+    console.error("JS: article-data-json element not found. Initializing articleData to default.");
+    articleData = {
+        articleId: null, hasTimestamps: false, numAudioParts: 0,
+        initialReadingLocation: null, articleAudioPartChecksums: null,
+        convertedMp3Path: null, mp3PartsFolderPath: null
+    };
 }
 
 // --- Global Constants ---
@@ -31,6 +39,7 @@ if (ARTICLE_AUDIO_PART_CHECKSUMS_STR && typeof ARTICLE_AUDIO_PART_CHECKSUMS_STR 
 
 // --- DOM Elements ---
 const articleContentWrapper = document.getElementById('article-content-wrapper');
+console.log("CONFIG_DEBUG: articleContentWrapper found:", !!articleContentWrapper);
 const popup = document.getElementById('translation-popup');
 const contextualMenu = document.getElementById('contextual-menu');
 const goBackButton = document.getElementById('goBackButton');
@@ -40,6 +49,7 @@ const gamepadStatusEmoji = document.getElementById('gamepad-status-emoji');
 
 // --- Sentence Selection UI Elements ---
 const toggleSentenceSelectionBtn = document.getElementById('toggle-sentence-selection-btn');
+console.log("CONFIG_DEBUG: toggleSentenceSelectionBtn found:", !!toggleSentenceSelectionBtn);
 const sentenceSelectionUIContainer = document.getElementById('sentence-selection-ui-container');
 const beginningSentenceDisplay = document.getElementById('beginning-sentence-display');
 const endingSentenceDisplay = document.getElementById('ending-sentence-display');
