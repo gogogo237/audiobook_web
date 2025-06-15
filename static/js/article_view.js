@@ -347,21 +347,24 @@ document.addEventListener('DOMContentLoaded', function() {
     }
 
     // --- Audio Processing ---
-    function playSentenceAudio(sentenceElement, isPlayingFromPart) {
+    function playSentenceAudio(sentenceElement, isPlayingFromPart, optionalDesiredStartTimeMs = null) {
         if (!initAudioContextGlobally()) {
             console.warn("Audio system could not be initialized for playSentenceAudio.");
             return;
         }
         if (audioContext.state === 'suspended') {
-            audioContext.resume().then(() => proceedWithPlayback(sentenceElement, isPlayingFromPart))
+            audioContext.resume().then(() => proceedWithPlayback(sentenceElement, isPlayingFromPart, optionalDesiredStartTimeMs))
                               .catch(e => { console.error("Could not start audio playback. User interaction might be needed.", e); });
         } else {
-            proceedWithPlayback(sentenceElement, isPlayingFromPart);
+            proceedWithPlayback(sentenceElement, isPlayingFromPart, optionalDesiredStartTimeMs);
         }
     }
 
-    function proceedWithPlayback(sentenceElement, isPlayingFromPart) {
+    function proceedWithPlayback(sentenceElement, isPlayingFromPart, optionalDesiredStartTimeMs = null) {
         if (!audioBuffer) {
+            // This check refers to the globally loaded audioBuffer, which might be full or a part.
+            // The waveform's click handler should ideally ensure the correct buffer is loaded if it's different.
+            // For now, we assume the buffer active (globally) is the one to be used.
             if (isAudiobookModeFull) alert("Please load the full audio file first.");
             else if (isAudiobookModeParts) alert("Please load the selected audio part first.");
             return;
@@ -372,28 +375,66 @@ document.addEventListener('DOMContentLoaded', function() {
             currentPlayingSentence.classList.remove('playing-sentence');
         }
 
-        let startTimeMs, endTimeMs;
+        let originalSentenceStartTimeMs, originalSentenceEndTimeMs;
         if (isPlayingFromPart) {
-            startTimeMs = parseInt(sentenceElement.dataset.startTimeInPartMs, 10);
-            endTimeMs = parseInt(sentenceElement.dataset.endTimeInPartMs, 10);
+            originalSentenceStartTimeMs = parseInt(sentenceElement.dataset.startTimeInPartMs, 10);
+            originalSentenceEndTimeMs = parseInt(sentenceElement.dataset.endTimeInPartMs, 10);
         } else {
-            startTimeMs = parseInt(sentenceElement.dataset.startTimeMs, 10);
-            endTimeMs = parseInt(sentenceElement.dataset.endTimeMs, 10);
+            originalSentenceStartTimeMs = parseInt(sentenceElement.dataset.startTimeMs, 10);
+            originalSentenceEndTimeMs = parseInt(sentenceElement.dataset.endTimeMs, 10);
         }
 
-        if (isNaN(startTimeMs) || isNaN(endTimeMs)) {
-            console.warn("Sentence missing time data. Cannot play audio for:", sentenceElement);
+        let playbackStartTimeMs;
+        let playbackEndTimeMs = originalSentenceEndTimeMs; // Default: play until the original end of the sentence
+
+        if (optionalDesiredStartTimeMs !== null && optionalDesiredStartTimeMs >= 0) {
+            // We have a specific start time, likely from a waveform click.
+            // This optionalDesiredStartTimeMs is ALREADY an absolute time within the currently loaded audioBuffer
+            // (either full audio or a specific part's buffer).
+            playbackStartTimeMs = optionalDesiredStartTimeMs;
+
+            // Ensure playbackStartTimeMs is not after or too close to the sentence's original end time within the same buffer.
+            // Also, ensure it's not before the sentence's original start time if we strictly want to stay within the sentence.
+            // For now, the primary concern is not starting after the original end.
+            if (playbackStartTimeMs >= playbackEndTimeMs) {
+                console.warn(`PLAYBACK_LOGIC: Desired start time ${playbackStartTimeMs}ms is at or after sentence end ${playbackEndTimeMs}ms. Not playing.`);
+                return;
+            }
+            // Optional: if you want to ensure the click doesn't make it start before the *original* start of sentence.
+            // This depends on desired UX. For now, allowing earlier start if click is on waveform padding for that sentence.
+            // if (playbackStartTimeMs < originalSentenceStartTimeMs) {
+            //     playbackStartTimeMs = originalSentenceStartTimeMs;
+            // }
+
+        } else {
+            // Standard playback: use the sentence's defined start time.
+            playbackStartTimeMs = originalSentenceStartTimeMs;
+        }
+
+        if (isNaN(playbackStartTimeMs) || isNaN(playbackEndTimeMs)) {
+            console.warn("PLAYBACK_LOGIC: Sentence missing time data for playback. Cannot play audio for:", sentenceElement);
             return;
         }
-        const offsetInSeconds = startTimeMs / 1000.0;
-        let durationInSeconds = (endTimeMs - startTimeMs) / 1000.0;
 
+        const offsetInSeconds = playbackStartTimeMs / 1000.0;
+        let durationInSeconds = (playbackEndTimeMs - playbackStartTimeMs) / 1000.0;
+
+        if (durationInSeconds <= 0) {
+             console.warn(`PLAYBACK_LOGIC: Calculated playback duration (${durationInSeconds.toFixed(3)}s) is zero or negative. Not playing.`);
+             return;
+        }
+
+        // Validate against the audioBuffer's properties
         if (offsetInSeconds < 0 || offsetInSeconds >= audioBuffer.duration) {
-            console.warn(`Sentence start time (${offsetInSeconds.toFixed(2)}s) is out of audio bounds (duration ${audioBuffer.duration.toFixed(2)}s).`);
+            console.warn(`PLAYBACK_LOGIC: Calculated playback start time (${offsetInSeconds.toFixed(2)}s) is out of audio buffer bounds (duration ${audioBuffer.duration.toFixed(2)}s).`);
             return;
         }
-        if (durationInSeconds <= 0) durationInSeconds = 0.05;
         durationInSeconds = Math.min(durationInSeconds, audioBuffer.duration - offsetInSeconds);
+         if (durationInSeconds <= 0) { // Check again after Math.min
+             console.warn(`PLAYBACK_LOGIC: Calculated playback duration (${durationInSeconds.toFixed(3)}s) became zero/negative after buffer adjustment. Not playing.`);
+             return;
+        }
+
 
         currentPlayingSentence = sentenceElement;
         currentPlayingSentence.classList.add('playing-sentence');
@@ -506,8 +547,198 @@ function displayWaveform(sentenceElement, audioBuffer, startTimeMs, endTimeMs) {
     canvas.width = finalCanvasWidth;  // Internal drawing surface width
     canvas.style.width = finalCanvasWidth + 'px'; // CSS width for scrolling
     canvas.height = 75; // Keep existing height
+    canvas.currentMarkerX = null; // Initialize marker position
 
     scrollContainer.appendChild(canvas);
+
+    // Store data on the canvas for the click handler and future playback
+    canvas.segmentStartTimeMs = startTimeMs;
+    canvas.segmentEndTimeMs = endTimeMs;
+    canvas.effectiveMsPerPixel = effectiveMsPerPixel;
+    canvas.audioBuffer = audioBuffer; // The full audio buffer used for this waveform display
+    canvas.sentenceElement = sentenceElement;
+
+    // Determine if playback for this sentence context is from a part or full audio
+    let isPlayingFromPartContext = false;
+    if (isAudiobookModeParts && sentenceElement.dataset.audioPartIndex !== undefined) {
+        const sentencePartIdx = parseInt(sentenceElement.dataset.audioPartIndex, 10);
+        if (sentencePartIdx === currentLoadedAudioPartIndex) {
+            isPlayingFromPartContext = true;
+        }
+    } else if (isAudiobookModeFull) {
+        isPlayingFromPartContext = false;
+    }
+    // If neither mode is active but waveform is shown (e.g. via 'edit clip' on full audio mode but then toggling off),
+    // assume it's based on the full audio times.
+    // The crucial aspect is that canvas.audioBuffer is the one currently loaded and matching sentence times.
+    // The playSentenceAudio function takes an isPlayingFromPart boolean.
+    // For click, we need to know if the segmentStartTimeMs/segmentEndTimeMs are relative to 'full' or 'part'.
+    // The parameters startTimeMs and endTimeMs passed to displayWaveform are already adjusted for this.
+    // So, the isPlayingFromPart for playSentenceAudio must match how sentenceElement time attributes are set.
+
+    // For the click handler, the key is that segmentStartTimeMs and segmentEndTimeMs are the 'true' start/end for the current audioBuffer.
+    // The `playSentenceAudio` function itself will use the sentenceElement's data attributes to get the correct times based on its own `isPlayingFromPart` argument.
+    // What we need for the click handler is to correctly *initiate* playback, respecting the original context.
+    // Let's check how playSentenceAudio is called from the 'edit-audio-clip' context menu
+    // displayWaveform(highlightedSentence, audioBuffer, startTimeMs, endTimeMs); -- here startTimeMs, endTimeMs are from full audio.
+    // So, if the waveform was generated from full audio, clicks should refer to full audio times.
+    // If it was generated in parts mode (hypothetically, not current implementation for 'edit clip'), it would use part times.
+    // The current 'edit-audio-clip' always uses the main audioBuffer and its associated startTimeMs/endTimeMs.
+    // So, isPlayingFromPart for the purpose of interpreting click should align with this.
+    // The global isAudiobookModeFull can indicate this.
+    canvas.isSegmentFromFullAudio = isAudiobookModeFull; // True if these times are for the full audio.
+
+    canvas.addEventListener('click', function(event) {
+        const clickX = event.offsetX;
+        let timeOffsetInSegmentMs = clickX * this.effectiveMsPerPixel;
+        const segmentDurationOnCanvasMs = this.segmentEndTimeMs - this.segmentStartTimeMs;
+
+        // Cap the time offset to the duration of the segment displayed on the canvas
+        if (timeOffsetInSegmentMs < 0) timeOffsetInSegmentMs = 0;
+        if (timeOffsetInSegmentMs > segmentDurationOnCanvasMs) {
+            timeOffsetInSegmentMs = segmentDurationOnCanvasMs;
+        }
+
+        const absolutePlayTimeMs = this.segmentStartTimeMs + timeOffsetInSegmentMs;
+
+        // this.isSegmentFromFullAudio indicates if segmentStartTimeMs is relative to the full audio or a part.
+        // For playSentenceAudio, the second argument `isPlayingFromPart` should be:
+        // - true: if the main audio player (audioBuffer) is currently a part AND sentence is in that part.
+        // - false: if the main audio player (audioBuffer) is the full audio.
+        // The sentenceElement's dataset attributes (data-start-time-ms vs data-start-time-in-part-ms) are used by playSentenceAudio.
+        // The boolean for logging should reflect the context of the waveform itself.
+        // If waveform is for full audio, its times are absolute. If for a part, its times are relative to part.
+        // The `isAudiobookModeFull` determines which audioBuffer is active.
+        // `this.audioBuffer` on canvas is the one used to generate the waveform.
+        // `startTimeMs`, `endTimeMs` given to displayWaveform are definitive for THAT waveform's context.
+
+        let logIsPlayingFromPart;
+        if (isAudiobookModeParts) {
+            const sentencePartIdx = parseInt(this.sentenceElement.dataset.audioPartIndex, 10);
+            logIsPlayingFromPart = (sentencePartIdx === currentLoadedAudioPartIndex);
+        } else {
+            logIsPlayingFromPart = false; // If in full audio mode, it's not playing from a part.
+        }
+
+
+        console.log(
+            "Waveform clicked at X:", clickX,
+            "Calculated time offset in segment (ms):", timeOffsetInSegmentMs.toFixed(2),
+            "Absolute play time for this waveform's buffer (ms):", absolutePlayTimeMs.toFixed(2),
+            "Waveform segment's original context was based on 'full' audio:", this.isSegmentFromFullAudio,
+            "Current playback context would be 'from part':", logIsPlayingFromPart
+        );
+
+        this.currentMarkerX = clickX;
+        const ctx = this.getContext('2d');
+
+        // --- Redraw the filled waveform ---
+        ctx.fillStyle = '#f0f0f0'; // Background
+        ctx.fillRect(0, 0, this.width, this.height);
+
+        // Re-extract segmentData (simplified, assumes this.audioBuffer is the correct one for these times)
+        // Note: audioBuffer on `this` (canvas) is the one used for this waveform.
+        // startTimeMs and endTimeMs for segment extraction are also on `this`.
+        const waveformStartSample = Math.floor((this.segmentStartTimeMs / 1000) * this.audioBuffer.sampleRate);
+        let waveformEndSample = Math.floor((this.segmentEndTimeMs / 1000) * this.audioBuffer.sampleRate);
+        if (waveformEndSample > this.audioBuffer.length) waveformEndSample = this.audioBuffer.length;
+
+        if (waveformStartSample >= waveformEndSample) { // Should not happen if initial checks passed
+            console.warn("Waveform click redraw: startSample >= endSample");
+             // Draw marker if any
+            if (typeof this.currentMarkerX === 'number') {
+                ctx.strokeStyle = 'red'; ctx.lineWidth = 1; ctx.beginPath();
+                ctx.moveTo(this.currentMarkerX, 0); ctx.lineTo(this.currentMarkerX, this.height); ctx.stroke();
+            }
+            return;
+        }
+        const currentSegmentData = this.audioBuffer.getChannelData(0).slice(waveformStartSample, waveformEndSample);
+
+        if (currentSegmentData.length === 0) {
+            console.warn("Waveform click redraw: currentSegmentData is empty.");
+            // Draw marker if any
+            if (typeof this.currentMarkerX === 'number') {
+                ctx.strokeStyle = 'red'; ctx.lineWidth = 1; ctx.beginPath();
+                ctx.moveTo(this.currentMarkerX, 0); ctx.lineTo(this.currentMarkerX, this.height); ctx.stroke();
+            }
+            return;
+        }
+
+        const currentSamplesPerPixel = currentSegmentData.length / this.width;
+        const currentUpperEnvelopePoints = [];
+        const currentLowerEnvelopePoints = [];
+
+        for (let x_coord = 0; x_coord < this.width; x_coord++) {
+            const startIdx = Math.floor(x_coord * currentSamplesPerPixel);
+            const endIdx = Math.floor((x_coord + 1) * currentSamplesPerPixel);
+            let maxVal = 0;
+            for (let i = startIdx; i < endIdx && i < currentSegmentData.length; i++) {
+                const val = Math.abs(currentSegmentData[i]);
+                if (val > maxVal) maxVal = val;
+            }
+            if (startIdx === endIdx && startIdx < currentSegmentData.length) {
+                 maxVal = Math.abs(currentSegmentData[startIdx]);
+            }
+            const v = maxVal;
+            const amplitude = v * this.height / 2;
+            currentUpperEnvelopePoints.push({ x: x_coord, y: (this.height / 2) - amplitude });
+            currentLowerEnvelopePoints.push({ x: x_coord, y: (this.height / 2) + amplitude });
+        }
+
+        if (this.width > 0 && currentSegmentData.length > 0) {
+            const lastSampleIdx = currentSegmentData.length - 1;
+            const lastVal = Math.abs(currentSegmentData[lastSampleIdx]);
+            const last_amplitude = lastVal * this.height / 2;
+            currentUpperEnvelopePoints.push({ x: this.width, y: (this.height / 2) - last_amplitude });
+            currentLowerEnvelopePoints.push({ x: this.width, y: (this.height / 2) + last_amplitude });
+        } else if (this.width > 0) {
+            currentUpperEnvelopePoints.push({ x: this.width, y: this.height / 2 });
+            currentLowerEnvelopePoints.push({ x: this.width, y: this.height / 2 });
+        }
+
+        if (currentUpperEnvelopePoints.length > 0) {
+            ctx.beginPath();
+            ctx.moveTo(currentUpperEnvelopePoints[0].x, currentUpperEnvelopePoints[0].y);
+            for (let i = 1; i < currentUpperEnvelopePoints.length; i++) {
+                ctx.lineTo(currentUpperEnvelopePoints[i].x, currentUpperEnvelopePoints[i].y);
+            }
+            for (let i = currentLowerEnvelopePoints.length - 1; i >= 0; i--) {
+                ctx.lineTo(currentLowerEnvelopePoints[i].x, currentLowerEnvelopePoints[i].y);
+            }
+            ctx.closePath();
+            ctx.fillStyle = 'rgba(0, 123, 255, 0.3)';
+            ctx.fill();
+        }
+        // --- End of waveform redraw ---
+
+        // Draw the new marker
+        ctx.strokeStyle = 'red';
+        ctx.lineWidth = 1;
+        ctx.beginPath();
+        ctx.moveTo(this.currentMarkerX, 0);
+        ctx.lineTo(this.currentMarkerX, this.height);
+        ctx.stroke();
+        console.log("WAVEFORM_MARKER: Drew new marker at X:", this.currentMarkerX);
+
+        // TODO in next step:
+        // 1. Get the correct startTimeForPlayback (either absolutePlayTimeMs if full, or timeOffsetInSegmentMs if part)
+        // 2. Call playSentenceAudio(this.sentenceElement, logIsPlayingFromPart, startTimeForPlayback)
+        //    (playSentenceAudio needs modification to accept a start time override)
+
+        // Determine the correct isPlayingFromPart argument for playSentenceAudio
+        // this.isSegmentFromFullAudio is true if the waveform was generated in the context of the full audio.
+        // If it's NOT from full audio, then it must have been from a part context.
+        const isPlayingFromPartArgument = !this.isSegmentFromFullAudio;
+
+        // It's crucial that `absolutePlayTimeMs` is correctly interpreted by `playSentenceAudio`
+        // If `isPlayingFromPartArgument` is true, `absolutePlayTimeMs` should be relative to the start of the part.
+        // If `isPlayingFromPartArgument` is false, `absolutePlayTimeMs` should be relative to the start of the full audio.
+        // The current `absolutePlayTimeMs` is `this.segmentStartTimeMs + timeOffsetInSegmentMs`.
+        // `this.segmentStartTimeMs` IS ALREADY correctly relative (either to full audio or part start).
+        // So, `absolutePlayTimeMs` as calculated is the correct value for `optionalDesiredStartTimeMs`.
+
+        playSentenceAudio(this.sentenceElement, isPlayingFromPartArgument, absolutePlayTimeMs);
+    });
 
     if (sentenceElement.parentElement) {
         sentenceElement.parentElement.insertAdjacentElement('afterend', scrollContainer);
@@ -659,6 +890,19 @@ function displayWaveform(sentenceElement, audioBuffer, startTimeMs, endTimeMs) {
     // ctx.stroke();
 
     console.log("WAVEFORM_DEBUG: Filled waveform drawing completed.");
+
+    // After main drawing, if there's a marker position stored, draw it
+    if (typeof canvas.currentMarkerX === 'number' && canvas.currentMarkerX >= 0 && canvas.currentMarkerX <= canvas.width) {
+        // Get context again, as it might be out of scope if drawing logic becomes more complex/refactored
+        const markerCtx = canvas.getContext('2d');
+        markerCtx.strokeStyle = 'red';
+        markerCtx.lineWidth = 1;
+        markerCtx.beginPath();
+        markerCtx.moveTo(canvas.currentMarkerX, 0);
+        markerCtx.lineTo(canvas.currentMarkerX, canvas.height);
+        markerCtx.stroke();
+        console.log("WAVEFORM_MARKER: Re-drew marker at X:", canvas.currentMarkerX, "during displayWaveform call.");
+    }
 }
 
     // --- Audio Parts View UI ---
